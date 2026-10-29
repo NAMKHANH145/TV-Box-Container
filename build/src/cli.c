@@ -45,5 +45,7 @@ void print_usage(const char *prog) {
 		"                  [--read-only]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
 		"       %s oci-run <bundle> | service create <name> <cmd> [args...] |\n"
-		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] | --version\n", prog, prog, prog, prog);
+		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] |\n"
+		"       %s sdk init <dir> [--profile=P] [--ram=32M] | sdk pack <dir> [-o OUT] [--force] |\n"
+		"       --version\n", prog, prog, prog, prog, prog);
 }

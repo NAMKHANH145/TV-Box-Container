@@ -285,6 +285,24 @@ else
   echo "SKIP: pull profile that (thieu $IMG/web-proxy-rootfs.tar.gz)"
 fi
 rm -rf $PD $WPDEST
+echo "=== sdk init/pack ==="
+SD=/tmp/mcsdk; rm -rf $SD; mkdir -p $SD/dist
+t "sdk init: tao skeleton" sh -c "$MC sdk init $SD/proj --profile=base-mini >/dev/null && [ -f $SD/proj/mc.conf ] && [ -d $SD/proj/rootfs ]"
+t "sdk init: mc.conf co ram mac dinh 32M" grep -q '^ram=32M' $SD/proj/mc.conf
+t "sdk init: tu choi thu muc khong rong" sh -c "! $MC sdk init $SD/proj >/dev/null 2>&1"
+cp -a $BR/. $SD/proj/rootfs/ 2>/dev/null
+mkdir -p $SD/proj/rootfs/usr/bin
+ln -sf ../../bin/sh $SD/proj/rootfs/usr/bin/mc-rel   # tuong doi, van trong rootfs: hop le
+t "sdk pack: tao tar.gz + .sha256" sh -c "$MC sdk pack $SD/proj -o $SD/dist/proj-rootfs.tar.gz >/dev/null && [ -f $SD/dist/proj-rootfs.tar.gz.sha256 ]"
+t "sdk pack: member deu la tuong doi" sh -c "[ \$(tar -tzf $SD/dist/proj-rootfs.tar.gz | grep -c '^/') -eq 0 ]"
+t "sdk pack: giu quyen thuc thi" sh -c "tar -tzvf $SD/dist/proj-rootfs.tar.gz | grep -q '^-rwx.*bin/busybox'"
+t "sdk pack: sha256 khop" sh -c "cd $SD/dist && sha256sum -c proj-rootfs.tar.gz.sha256 >/dev/null"
+t "sdk pack: tu choi ghi de khi chua --force" sh -c "! $MC sdk pack $SD/proj -o $SD/dist/proj-rootfs.tar.gz >/dev/null 2>&1"
+ln -sf ../../etc/passwd $SD/proj/rootfs/escape
+t "sdk pack: tu choi symlink vuot root" sh -c "! $MC sdk pack $SD/proj -o $SD/dist/x-rootfs.tar.gz >/dev/null 2>&1"
+rm -f $SD/proj/rootfs/escape
+t "sdk -> pull -> run (round-trip)" sh -c "$MC pull proj --url=$SD/dist --dest=$SD/round --force >/dev/null 2>&1 && $MC run --rootfs $SD/round /bin/sh -c 'echo ok' | grep -q ok"
+rm -rf $SD
 echo "=== leak ==="
 t "mount leak = 0" sh -c '! mount | grep -qE "/opt/(rootfs|alpine)/"'
 echo "=== T7 latency (assert <500ms) ==="
@@ -293,5 +311,5 @@ if [ "$MS" -lt 500 ]; then echo "PASS: T7 latency ${MS}ms"; PASS=$((PASS+1));
 else echo "FAIL: T7 latency ${MS}ms"; FAIL=$((FAIL+1)); fi
 echo "=== T9 docker nen (info) ==="
 ps -o comm,rss= -C dockerd -C containerd 2>/dev/null
-echo "=== KET QUA: PASS=$PASS FAIL=$FAIL ==="
+echo "=== KET QUA: PASS=$PASS FAIL=$FAIL TONG=$((PASS+FAIL)) ==="
 [ "$FAIL" -eq 0 ]

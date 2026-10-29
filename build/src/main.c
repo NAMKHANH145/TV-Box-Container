@@ -1,7 +1,7 @@
 /* main.c — dispatch lenh: run/ps/stats/stop/rm/oci-run */
 #include "common.h"
 
-#define VERSION "1.4.0"
+#define VERSION "1.5.0"
 
 #if defined(__aarch64__)
 #define MC_ARCH "aarch64"
@@ -27,6 +27,12 @@ int main(int argc, char **argv) {
 	if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
 		printf("minicontainer %s (%s, %s, static)\n", VERSION, MC_ARCH, MC_LIBC);
 		return 0;
+	}
+	if (argc >= 3 && strcmp(argv[1], "sdk") == 0)
+		return do_sdk(argc, argv);
+	if (argc >= 2 && strcmp(argv[1], "sdk") == 0) {
+		fprintf(stderr, "Usage: %s sdk init <dir> [flags]  |  sdk pack <dir> [-o OUT] [--force]\n", argv[0]);
+		return 1;
 	}
 	if (argc >= 2 && strcmp(argv[1], "stats") == 0) {
 		int json = 0;
