@@ -20,7 +20,7 @@ Tài liệu này trả lời 3 câu hỏi: **dự án có những module nào**,
 | `--net=bridge` | ❌ Chưa làm (hiện chỉ `host` / `isolated`) |
 | Health check chế độ `-d` | ✅ Watchdog dùng chung với `--disk`, marker `health_failed` |
 | Rootfs profiles (4 bản) | ✅ Defconfig đã validate với Buildroot; mới build base-mini trên phần cứng |
-| CI GitHub Actions | 🚧 Workflow có, **chưa chạy thật** trên GitHub |
+| CI GitHub Actions | ✅ 4/4 arch xanh (run `40842042612`); release theo tag chưa test |
 | Soak test 24h | ❌ Chưa làm |
 
 **Nguyên tắc:** mọi task phải có (1) code, (2) test trong `build/test.sh` hoặc test riêng, (3) cập nhật `README/CHANGELOG` nếu thay đổi hành vi. Không nhận task nào chỉ "chạy được trên laptop".
@@ -77,7 +77,7 @@ Mỗi track có 1 owner chính. Cột "Owner" đang để trống — điền t�
 | ID | Việc | Ưu tiên | Ước lượng | Phụ thuộc | Điều kiện xong |
 |---|---|---|---|---|---|
 | **B1 / R5-2** | Build thật 3 profile còn lại (`iot-gateway`, `python-edge`, `web-proxy`) trên Buildroot | P0 | 2–4 buổi (máy yếu lâu hơn) | `profiles/*.defconfig` đã validate | `rootfs.tar.gz` chạy được `minicontainer run`; đo kích thước/RAM thực tế, ghi vào `profiles/README.md` |
-| **B2 / R5-1** | Chạy CI GitHub Actions thật: sửa workflow theo lỗi thực tế, cache toolchain | P0 | 1 buổi + thời gian CI | Repo đã push | 4 artifact (aarch64/armv7l/x86_64/riscv64) build xanh; release tag tạo được |
+| **B2 / R5-1** | CI GitHub Actions 4 arch đã xanh (run `40842042612`); còn: cache toolchain + thử release theo tag | P0 | 0.5 buổi | Repo đã push | 4 artifact build xanh (**xong**); tag `v*` tạo release có checksum (B3) |
 | **B3 / R4-3** | Đóng gói release tarball (binary + README + test.sh + checksum) | P1 | 0.5 buổi | B2 | `release.sh` chạy end-to-end; tarball cài trên box không lỗi |
 | **B4** | `profiles/build.sh`: thêm `--clean`, kiểm tra dung lượng đĩa trước build, log rõ | P2 | 0.5 buổi | B1 | Build lại từ đầu bằng 1 lệnh; lỗi thiếu dung lượng báo trước khi build |
 

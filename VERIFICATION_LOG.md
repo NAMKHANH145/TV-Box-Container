@@ -126,6 +126,10 @@ process).
 Profiles: 4 defconfig parsed successfully with Buildroot `2026.11-git` and kept
 all requested symbols; only `base-mini` has been built and exercised on hardware.
 
-Remaining: R5-1 CI not exercised, R5-2 3 dynamic profiles not built, R5-3
-bridge/exec, T3 24h soak.
+CI: GitHub Actions `workflow_dispatch` run `40842042612` built all four
+architectures green (aarch64 33s, armv7l 16s, x86_64 15s, riscv64 19s).
+Release-on-tag was skipped (not a tag) and remains untested.
+
+Remaining: R5-2 3 dynamic profiles not built, R5-3 bridge/exec, release tag,
+T3 24h soak.
 

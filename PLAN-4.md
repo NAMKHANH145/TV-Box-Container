@@ -18,7 +18,7 @@ Khắc phục các F1–F9 trong báo cáo tiến độ, chia 5 đợt R1–R5 (
 - [x] **R4-1. `--timeout=N` cho `stop` (F6)**  
 - [x] **R4-2. `--version` + man/README/CHANGELOG (F7)** (version + README + CHANGELOG created)  
 - [ ] **R4-3. Release tarball** (needs actual build/test on TV Box)  
-- [ ] **R5-1. Multi-arch Release (CI/CD)** (GitHub Actions workflow created, chưa chạy thật)  
+- [ ] **R5-1. Multi-arch Release (CI/CD)** (4 arch build xanh run 40842042612; release tag chưa test)  
 - [ ] **R5-2. Rootfs Profiles & SDK** (4 defconfig đã validate; mới base-mini build thật)  
 - [ ] **R5-3. Production hardening** (`--net=bridge` not implemented; `service create` implemented; `--health-cmd` foreground + detached implemented)
 - [ ] **R5-4. Release gate mở rộng** (needs TV Box deployment)
@@ -26,7 +26,7 @@ Khắc phục các F1–F9 trong báo cáo tiến độ, chia 5 đợt R1–R5 (
 ## Đợt R5 — Production-grade (định hướng sản phẩm)
 
 ### R5-1. Multi-arch Release (CI/CD)
-- [ ] GitHub Actions cross-compile 4 arch: aarch64, armv7l, x86_64, riscv64.
+- [x] GitHub Actions cross-compile 4 arch: aarch64, armv7l, x86_64, riscv64. (run 40842042612, 2026-10-29)
 - [ ] GitHub Releases tự động, naming `minicontainer-linux-<arch>`, chmod +x là chạy.
 - [ ] CI chạy `test.sh` trên box aarch64 trước khi release.
 

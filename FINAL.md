@@ -15,7 +15,8 @@
   `/usr/local/bin/minicontainer.prev.bak`
 
 ## Remaining (không chặn release)
-- R5-1: GitHub Actions workflow 4 arch có, **chưa chạy thật** trên CI
+- R5-1: GitHub Actions build 4 arch **xanh** (`workflow_dispatch`, run
+  `40842042612`); release job theo tag chưa chạy thử
 - R5-2: 4 defconfig đã validate; mới `base-mini` build + chạy thật, 3 profile
   dynamic cần build (B1 trong `TASKS.md`)
 - R5-3: `--net=bridge` (netlink/veth) và `exec` chưa làm; health check vẫn chạy
