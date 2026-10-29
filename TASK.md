@@ -241,12 +241,12 @@ Local working tree sạch, `main` đã push.
 
 ## 10. Brief gửi từng người (dán nguyên khối)
 
-> Bản gửi ngày 2026-10-30. Hash commit trong brief là hash lúc gửi — lấy hash mới nhất bằng
-> `git log --oneline -1`. Nội dung dưới đây là **nguyên văn tin nhắn**; khi cần sửa thì sửa ở đây rồi
-> gửi lại, đừng sửa riêng trong chat.
+> Bản gửi ngày 2026-10-30, nội dung **nguyên văn tin nhắn**. Hash commit không ghi cứng trong brief
+> (sẽ lệch sau mỗi lần commit) — lấy hash mới nhất bằng `git log --oneline -1`. Khi cần sửa brief thì
+> sửa ở đây rồi gửi lại, đừng sửa riêng trong chat.
 
 ```
-Repo: https://github.com/NAMKHANH145/TV-Box-Container (nhánh main, mới nhất dfc4acf)
+Repo: https://github.com/NAMKHANH145/TV-Box-Container (nhánh main; hash mới nhất: `git log --oneline -1`)
 Đọc trước: TASK.md §3 (bảng phân công) + §7 (việc còn lại). Chỉ Khánh sửa code.
 
 --- HUY (Track B — phát hành & hạ tầng, ~5h) ---
