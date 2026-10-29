@@ -28,6 +28,11 @@ minicontainer run --ram=30M --cpu=20 --rootfs=/opt/rootfs-base-mini /bin/sh
 bash test.sh        # 84 case
 ```
 
+```bash
+# trên laptop, không cần box và không cần root: 11 check cho sdk init/pack
+cd build && bash smoke-sdk.sh
+```
+
 ## Tài liệu
 
 | File | Nội dung |

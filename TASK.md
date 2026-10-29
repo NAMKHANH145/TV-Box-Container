@@ -29,7 +29,7 @@ Dự án đã hoàn thành phần runtime; §7 là phần việc còn lại đã
 
 ---
 
-## 2. Bản đồ module (15 module, ~2.430 dòng C)
+## 2. Bản đồ module (15 module, ~2.412 dòng C)
 
 | # | File | Dòng | Nhiệm vụ | Độ khó |
 |---|---|---:|---|---|
@@ -37,7 +37,7 @@ Dự án đã hoàn thành phần runtime; §7 là phần việc còn lại đã
 | 2 | `src/cli.c` | 46 | parse argv → `struct cfg`, validate | Dễ |
 | 3 | `src/common.c/.h` | 96+116 | helper: `die`, `parse_bytes`, file I/O, `struct cfg` | Dễ |
 | 4 | `src/ns.c` | 218 | clone child: userns map, chroot, `/dev`, `--read-only`, bridge config | **Khó** |
-| 5 | `src/run.c` | 243 | supervisor: cgroup → clone → wait/detach → watchdog → dọn | **Khó** |
+| 5 | `src/run.c` | 225 | supervisor: cgroup → clone → wait/detach → watchdog → dọn | **Khó** |
 | 6 | `src/exec.c` | 124 | `setns` user→net/uts/ipc→mnt→pid, `O_PATH` root, fork, seccomp | **Khó** |
 | 7 | `src/bridge.c` | 159 | `mcbr0` + veth, ioctl trong netns, `netns_lo_up()` | Trung bình |
 | 8 | `src/cgroup.c` | 104 | v2: `memory.max/cpu.max/pids.max/io.max`, attach, cleanup | Trung bình |
@@ -109,9 +109,9 @@ Task P0 trễ → cắt P2 trước, **không** cắt test và không hạ số 
 | ID | Việc | Ưu tiên | Trạng thái |
 |---|---|---|---|
 | B1 | Build 3 profile động (web-proxy, python-edge, iot-gateway) | P0 | ✅ |
-| B2 | CI 4 arch xanh + release theo tag | P0 | ✅ `v1.4.0` tag 2026-10-30 |
+| B2 | CI 4 arch xanh + release theo tag | P0 | ✅ `v1.4.0` tag 2026-10-30; thêm job `smoke-sdk` cho push `main` + PR |
 | B3 | `release.sh` tarball + `SHA256SUMS.txt` | P1 | ✅ |
-| B4 | `profiles/build.sh`: `--clean`, kiểm dung lượng trước build | P2 | ⬜ |
+| B4 | `profiles/build.sh`: `--clean`, kiểm dung lượng trước build | P2 | ✅ 2026-10-30 (`MIN_FREE_GB`, `FORCE=1`) |
 | B5 | Cache toolchain CI / self-hosted runner | P2 | ⬜ (§7) |
 
 **Track C — Test, an ninh & độ bền · Dev C**
@@ -201,10 +201,12 @@ CI musl + 74 test (v1.4.0).
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |
 | 5 | Bridge NAT + DNS + port mapping | A | cân nhắc chi phí CPU trên S905W; chỉ làm khi có nhu cầu thật |
 | 6 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
-| 7 | `profiles/build.sh --clean` + kiểm dung lượng trước build | B | P2 |
+| 7 | Verify asset bằng `smoke-sdk.sh` trên 4 arch | B | tải asset rồi `bash smoke-sdk.sh ./minicontainer-linux-<arch>` |
 
-Đã xong 2026-10-30: tag `v1.4.0` (CI dựng asset musl), `sdk init/pack` + 10 test, LICENSE MIT,
-test.sh tự in tổng số case.
+Đã xong 2026-10-30 (không cần box): tag `v1.4.0` (CI dựng 4 asset musl), `sdk init/pack` + 10 test,
+LICENSE MIT, `test.sh` in tổng số case, `smoke-sdk.sh` + job CI `smoke-sdk` (push `main` + PR),
+`profiles/build.sh --clean` + kiểm dung lượng, signal handler của `run.c` chỉ còn thao tác
+async-signal-safe.
 
 ## 8. Việc chưa nên làm (tránh phân tâm)
 
@@ -235,3 +237,45 @@ Local working tree sạch, `main` đã push.
 3. `GUIDE.md` — build/deploy/dùng CLI.
 4. `TASK.md` (file này) — ai làm gì, còn gì.
 5. `progress/` — chi tiết từng phase khi cần truy nguyên.
+---
+
+## 10. Brief gửi từng người (dán nguyên khối)
+
+> Bản gửi ngày 2026-10-30. Hash commit trong brief là hash lúc gửi — lấy hash mới nhất bằng
+> `git log --oneline -1`. Nội dung dưới đây là **nguyên văn tin nhắn**; khi cần sửa thì sửa ở đây rồi
+> gửi lại, đừng sửa riêng trong chat.
+
+```
+Repo: https://github.com/NAMKHANH145/TV-Box-Container (nhánh main, mới nhất dfc4acf)
+Đọc trước: TASK.md §3 (bảng phân công) + §7 (việc còn lại). Chỉ Khánh sửa code.
+
+--- HUY (Track B — phát hành & hạ tầng, ~5h) ---
+1. Vào Actions xem run của tag v1.4.0, chụp log 4 job build + job release.
+2. Tải 4 asset về (gh release download v1.4.0), verify SHA256SUMS.txt.
+3. Với armv7l/riscv64/x86_64: chạy `qemu-<arch>-static ./minicontainer-linux-<arch> --version`
+   và `ps`, ghi nguyên output. aarch64 để Khánh chạy trên box.
+   Tiện thể chạy `bash smoke-sdk.sh ./minicontainer-linux-<arch>` (11 check, không cần root).
+4. Viết progress/RELEASE-v1.4.0.md: bảng arch | size | sha256 | lệnh đã chạy | kết quả.
+5. Soạn 1 trang so sánh MIT vs Apache-2.0 (repo đang MIT) — chỉ đề xuất, không tự đổi.
+Nộp: PR chỉ chứa progress/RELEASE-v1.4.0.md. Không sửa src/, không tag.
+
+--- DEV C (Track C — QA & bằng chứng, ~10h, chờ box online) ---
+1. Soak đêm trên box: `ITER=117000 bash build/soak.sh` (1.36 vòng/s ≈ 24h), báo mỗi 2h.
+2. `bash build/bench.sh` 3 lần, lấy p50/p95/p99.
+3. `bash test.sh` 3 lần liền — kỳ vọng TONG=84, FAIL=0 (lần đầu cần
+   `scp bomb breakout root@<IP_BOX>:/opt/rootfs/`).
+4. Chạy lại bộ an ninh: bomb, breakout, mount, ptrace, open_by_handle_at — mỗi vector phải bị chặn.
+5. Rà Ctrl-C: chạy `minicontainer run ...` rồi Ctrl-C 20 lần liền, sau mỗi lần kiểm
+   `ls -d /sys/fs/cgroup/minicontainer-*` (phải rỗng) và `ls /opt/rootfs/.oldroot` (phải không có).
+   Đây là phần vừa sửa signal handler ở v1.5.0 (handler chỉ còn `kill`, dọn dẹp làm sau `waitpid`).
+6. Ghi tất cả vào progress/VERIFICATION_LOG.md đúng dạng "lệnh → kết quả thô".
+Nộp: PR chỉ chứa progress/VERIFICATION_LOG.md. Không tự sửa test.sh để test xanh.
+
+--- DEV D (Track D — tài liệu, demo, báo cáo, ~12h) ---
+1. Slide 15–18 trang từ FINAL.md, bắt buộc 3 hình: sơ đồ 3 tầng (§3), luồng syscall của run (§5),
+   bảng so sánh SOTA (§9). Số nào cũng phải có nguồn trong FINAL/progress.
+2. Video demo 5 phút chạy thật, không cắt ghép: run → ps/stats → CPU 20% → OOM ở 30M → exec → stop.
+3. Soát GUIDE.md bằng cách làm đúng như người mới (build, deploy, run), ghi lại 10 chỗ vấp.
+4. Dùng <IP_BOX> trong mọi tài liệu, không ghi IP/mật khẩu thật.
+Nộp: PR chỉ chứa docs/slide + danh sách lỗi GUIDE.
+```

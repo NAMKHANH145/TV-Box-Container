@@ -6,7 +6,7 @@ so sánh với SOTA và giới hạn. Cách dùng CLI xem `GUIDE.md`; lịch s�
 nhật ký từng phase xem `progress/`.
 
 **Tóm tắt một dòng:** `minicontainer` là engine container zero-daemon viết bằng C, musl static
-(144.904 B bản Buildroot / 125.392 B asset CI v1.4.0, aarch64), 15 module / 2.430 dòng, chạy trên
+(144.904 B bản Buildroot / 125.392 B asset CI v1.4.0, aarch64), 15 module / 2.412 dòng, chạy trên
 Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** trên box thật.
 
 ---
@@ -79,7 +79,7 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 | `cli.c` | 51 | `getopt` tự viết, nhận cả `--ram 30M` và `--ram=30M`, validate đầu vào |
 | `common.c/.h` | 141+122 | `die()`, `parse_bytes()`, `valid_name`, `run_wait`/`run_capture`, `struct cfg` |
 | `ns.c` | 218 | thân tiến trình con: mount private, chroot/chdir, `/proc`, `/dev`, `--read-only`, uid_map |
-| `run.c` | 243 | supervisor: clone → pipe “go” → attach cgroup → wait/detach, watchdog disk/health, forward tín hiệu |
+| `run.c` | 225 | supervisor: clone → pipe “go” → attach cgroup → wait/detach, watchdog disk/health, forward tín hiệu (handler chỉ `kill`) |
 | `exec.c` | 124 | `setns()` user→net/uts/ipc→mnt→pid, `O_PATH /proc/<pid>/root`, fork, seccomp, attach cgroup |
 | `bridge.c` | 159 | tạo `mcbr0`, veth, `netns_lo_up()`, cấu hình `eth0`/route bằng ioctl trong netns |
 | `cgroup.c` | 104 | tạo/bật controller v2, ghi trần, attach, đọc stat, dọn (`cgroup.kill` + retry rmdir) |
@@ -472,7 +472,7 @@ Hệ thống đạt mục tiêu đề tài: tự gọi syscall Linux (`clone`, `
 (Process Management, Memory Management, File System, Namespaces, Cgroups), chạy được trên phần cứng
 hạn chế, zero-daemon, có số liệu đo thật và test tự động trên box.
 
-**Bottom line:** 15 module, 2.430 dòng C, zero-daemon, 1 binary static. Toàn bộ backlog R5 (health,
+**Bottom line:** 15 module, 2.412 dòng C, zero-daemon, 1 binary static. Toàn bộ backlog R5 (health,
 `exec`, bridge, `--read-only`, `pull`, `sdk`) đã xong; phần runtime verify trên phần cứng thật,
 `sdk` verify bằng test tự động (không cần root). Phần còn lại là việc hạ tầng (soak 24 h, runner tự
 host, LICENSE), không phải tính năng runtime.

@@ -22,14 +22,15 @@
 
 ```
 build/src/*.c        15 module (main, cli, common, ns, run, exec, bridge, cgroup,
-                     disk, seccomp, oci, state, systemd, pull, sdk) — ~2.430 dòng
+                     disk, seccomp, oci, state, systemd, pull, sdk) — ~2.412 dòng
 build/Makefile       make / make tools / make deploy BOX=… SSHPASS_FILE=… / make clean
-build/test.sh        84 case, phải xanh trước mọi PR
+build/test.sh        84 case, phải xanh trước mọi PR (cần box + root)
+build/smoke-sdk.sh   11 check sdk init/pack, không cần root/box — chạy cả trên CI
 build/soak.sh        ITER=… (24 h ≈ ITER=117000), kiểm rò cgroup/mount/state
 build/bench.sh       độ trễ + so sánh Docker
 build/release.sh     tarball + SHA256SUMS, version đọc từ src/main.c
-profiles/            4 defconfig Buildroot + build.sh
-.github/workflows/   CI 4 arch musl + release theo tag
+profiles/            4 defconfig Buildroot + build.sh [--clean] (kiểm dung lượng trước build)
+.github/workflows/   CI 4 arch musl + smoke-sdk (push main/PR) + release theo tag
 progress/            lịch sử + bằng chứng
 ```
 
@@ -81,17 +82,25 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 - CI dùng image Docker Hub `muslcc/x86_64:<target>` (musl.cc chặn IP runner GitHub); image không có
   `make` → gọi `gcc -static -O2 -Wall` trực tiếp; gate fail nếu binary > 200 KB.
 - Asset release tải về **mất bit `+x`** → phải `chmod +x`.
+- Signal handler của `run.c` chỉ được làm 2 việc async-signal-safe: ghi `sig_atomic_t` và `kill(child)`.
+  Không `fopen`/`rmdir`/`usleep`/`cgroup_cleanup` trong handler (deadlock nếu signal đến giữa
+  `malloc`/stdio); dọn dẹp làm sau `waitpid` trong luồng bình thường.
+- `sdk pack` kiểm tra symlink **lexically** (không `realpath`): target tuyệt đối luôn hợp lệ, target
+  tương đối chỉ bị từ chối khi đi lên quá gốc rootfs. Đừng đổi sang "chặn mọi `..`" — sẽ chặn cả
+  `usr/bin/x -> ../../bin/y` của Buildroot/Alpine.
 
 ## 6. Việc tiếp theo (theo thứ tự)
 
 1. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
-2. Tag `v1.5.0` sau soak: `bash build/release.sh` rồi tag (hỏi trước — shared state).
-3. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local).
-4. Self-hosted runner aarch64 chạy `test.sh` trước release.
-5. Bridge NAT/DNS/port mapping — chỉ làm khi có nhu cầu thật.
-6. `profiles/build.sh --clean` + kiểm dung lượng trước build.
+2. `bash test.sh` trên box (kỳ vọng `TONG=84`), rồi Ctrl-C 20 lần liền để kiểm đường dọn dẹp mới.
+3. Tag `v1.5.0` sau soak: `bash build/release.sh` rồi tag (hỏi trước — shared state).
+4. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local); asset mới có kèm
+   `smoke-sdk.sh` nên mỗi arch tự kiểm được `sdk` mà không cần root.
+5. Self-hosted runner aarch64 chạy `test.sh` trước release.
+6. Bridge NAT/DNS/port mapping — chỉ làm khi có nhu cầu thật.
 
-Đã xong 2026-10-30: tag `v1.4.0`, `sdk init/pack` + 10 test, LICENSE MIT, `test.sh` tự in tổng case.
+Đã xong 2026-10-30 (không cần box): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job CI,
+`profiles/build.sh --clean` + kiểm dung lượng, LICENSE MIT, signal handler `run.c` async-signal-safe.
 
 ## 7. Bàn giao nhanh
 

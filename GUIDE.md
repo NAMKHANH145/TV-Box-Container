@@ -42,6 +42,7 @@ cd build/
 make                 # -> build/minicontainer (musl static, aarch64)
 make clean && make   # build sạch
 make tools           # build bomb + breakout (công cụ test)
+bash smoke-sdk.sh     # 11 check sdk init/pack — không cần root, không cần box
 ```
 
 `make` mặc định dùng `buildroot/output/host/bin/aarch64-buildroot-linux-musl-gcc` (biến `TOOLCHAIN`).
@@ -396,8 +397,7 @@ trước khi kết luận box hỏng.
 
 ```bash
 # trên box, trong thư mục chứa test.sh
-bash test.sh                      # 74 case, exit != 0 nếu có FAIL
-BR=/opt/rootfs-web bash test.sh   # chạy với rootfs khác
+bash test.sh                      # 84 case, exit != 0 nếu có FAIL
 
 bash soak.sh                      # 100 vòng mặc định
 ITER=1000 bash soak.sh            # dài hơn
@@ -405,6 +405,9 @@ ITER=117000 bash soak.sh          # ~24 h (đo trên box ~1.36 vòng/s)
 HOUR=24 bash soak.sh              # ~15 h (3000 vòng/giờ) — muốn đúng 24 h thì dùng ITER
 
 bash bench.sh                     # độ trễ p50/p95/p99 vs Docker, RAM, CPU
+
+# không cần root, không cần box: 11 check cho sdk init/pack (chạy trên laptop)
+bash smoke-sdk.sh                 # hoặc: bash build/smoke-sdk.sh [đường-dẫn-binary]
 ```
 
 `soak.sh` luân phiên 6 kiểu vòng (foreground, `--ram/--cpu`, `--net=isolated`, `--pids/--disk`,
@@ -412,7 +415,7 @@ bash bench.sh                     # độ trễ p50/p95/p99 vs Docker, RAM, CPU
 `MemAvailable` đầu/cuối. Kết quả mong đợi cuối: `loi=0 lan-leak=0`, `SOAK OK`.
 
 Điều kiện tiên quyết của `test.sh`: `/usr/local/bin/minicontainer`, `$BR/bin/busybox`, `$ALP/bin/busybox`,
-`$BR/bomb`, `$BR/breakout` (`BR=/opt/rootfs`, `ALP=/opt/alpine` — override được qua biến môi trường).
+`$BR/bomb`, `$BR/breakout` (`BR=/opt/rootfs`, `ALP=/opt/alpine` — hằng số ở đầu `test.sh`, muốn đổi thì sửa ở đó).
 Build hai công cụ test trên laptop bằng `make tools`, rồi copy vào rootfs:
 
 ```bash

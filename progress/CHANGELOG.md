@@ -13,20 +13,35 @@
   kết thúc bằng `-rootfs.tar.gz` (khi đó `pull` không tìm thấy file).
 - 10 case `sdk` trong `build/test.sh` (init, mặc định `mc.conf`, chống ghi đè, tar member tương đối,
   giữ `+x`, sha256 khớp, symlink vượt root bị từ chối, round-trip `pack → pull → run`).
+- **`build/smoke-sdk.sh`** — 11 check cho `sdk` chạy được **không cần root và không cần box**
+  (laptop/CI). Job CI `smoke-sdk` (x86_64 musl) chạy trên `push: main` và `pull_request`;
+  `smoke-sdk.sh` cũng được phát hành kèm asset để kiểm từng arch.
 - `LICENSE` — MIT.
+- `TASK.md` §10: brief gửi từng người (nguyên văn) để không phải chép lại trong chat.
 
 ### Changed
 - `run_wait()` / `run_capture()` chuyển từ `static` trong `pull.c` sang `common.c` để `sdk.c` dùng
   chung (một implementation duy nhất cho "chạy lệnh bằng argv literal").
 - `test.sh` in tổng số case ở dòng cuối (`PASS=… FAIL=… TONG=…`) để tài liệu không lệch số.
-- `release.sh` đóng gói kèm `LICENSE`.
+- `release.sh` đóng gói kèm `LICENSE`; CI phát hành thêm `smoke-sdk.sh`.
+- `profiles/build.sh`: thêm `--clean` (xoá `build/rootfs-<profile>`, **giữ** toolchain dùng chung) và
+  kiểm dung lượng trống trước build (`MIN_FREE_GB`, mặc định 4 GB; `FORCE=1` để bỏ qua).
+- CI trigger thêm `push: branches: [main]` và `pull_request` (job release vẫn chỉ chạy theo tag).
 - VERSION 1.4.0 → **1.5.0** (`minicontainer 1.5.0 (aarch64, musl, static)`, 144.904 B).
+
+### Fixed
+- **`run.c`: signal handler không còn gọi hàm không async-signal-safe.** `cleanup_and_exit()` cũ gọi
+  `fopen`/`fgets`/`rmdir`/`usleep`/`cgroup_cleanup` ngay trong handler (deadlock nếu SIGINT đến giữa
+  `malloc`/stdio) và dọn dẹp **hai lần** (`rmdir` rồi `cgroup_cleanup` cũng `rmdir`). Handler giờ chỉ
+  ghi `sig_atomic_t` + `kill(child, SIGKILL)`; `waitpid` trả về, rồi `do_run()` mới `cgroup_kill` +
+  `cgroup_cleanup` + trả `128+sig`. `run.c` 243 → 225 dòng.
 
 ### Verified
 - Build sạch `-O2 -Wall`, **0 warning**, cả 15 module trên toolchain Buildroot musl.
 - 9/9 check `sdk` chạy trên laptop (binary aarch64 qua binfmt, không cần root): init/pack/sha256/
   tar member/`+x`/chống ghi đè/từ chối symlink — xem `progress/VERIFICATION_LOG.md`.
 - Round-trip `sdk pack → pull → giải nén` giữ đúng nội dung và quyền file.
+- `bash build/smoke-sdk.sh` → **11/11 PASS** trên laptop (2026-10-30).
 - Tag `v1.4.0` tạo ngày 2026-10-30 trên commit `d616d48` (CI dựng 4 asset musl).
 
 ## [1.4.0] - 2026-10-29

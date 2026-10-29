@@ -381,3 +381,59 @@ Trạng thái CI/release của tag này: xem tab Actions; asset aarch64 **chưa*
 - `test.sh` full suite (84 case) trên box — box offline.
 - Soak 24 h — cần box.
 - Verify 4 asset musl trên phần cứng thật — cần box/qemu.
+
+---
+
+## v1.5.0 — phần không cần box (2026-10-30, phiên 2)
+
+Box vẫn không truy cập được → mọi số dưới đây đo trên **laptop**. Không có tuyên bố nào về phần cứng.
+
+### Build sau khi sửa `run.c`
+
+```
+cd build && make clean && make
+-rwxrwxr-x 1 ... 144904 minicontainer       (không đổi kích thước)
+warning: 0                                    (touch src/run.c && make | grep -c warning)
+```
+
+`run.c` 243 → 225 dòng: handler chỉ còn `g_stop_sig = sig` + `kill(g_child_pid, SIGKILL)`.
+
+### `bash build/smoke-sdk.sh` — 11/11 PASS
+
+```
+=== sdk init ===
+PASS: init: tao skeleton (rootfs/ + mc.conf + README.md)
+PASS: init: mc.conf co ram mac dinh 32M
+PASS: init: tu choi thu muc khong rong
+=== sdk pack ===
+PASS: pack: tao tar.gz + .sha256
+PASS: pack: member deu la tuong doi
+PASS: pack: giu quyen thuc thi
+PASS: pack: sha256 khop
+PASS: pack: giu symlink tuyet doi + tuong doi trong rootfs
+PASS: pack: tu choi ghi de khi chua --force
+PASS: pack: tu choi symlink vuot goc rootfs
+=== round-trip pack -> pull ===
+PASS: pull tu thu muc local: sha256 khop + giai nen du
+=== KET QUA: PASS=11 FAIL=0 TONG=11 ===
+```
+
+Script chạy bằng binary aarch64 (binfmt/qemu-user) trên laptop; không root, không namespace.
+
+### `profiles/build.sh` — các nhánh lỗi (không chạy build thật, mất vài giờ)
+
+```
+bash profiles/build.sh                  -> usage: ... [--clean] <profile>            exit=1
+bash profiles/build.sh --nope base-mini -> unknown flag: --nope                      exit=1
+bash profiles/build.sh --clean nope     -> unknown profile: nope                     exit=1
+MIN_FREE_GB=99999 bash profiles/build.sh base-mini
+  -> warning: chi con 84 GB ..., can >= 99999 GB (MIN_FREE_GB=... / FORCE=1)          exit=1
+```
+`bash -n profiles/build.sh` OK.
+
+### Chưa verify được (cần box)
+
+- `test.sh` full suite (84 case) và 20 lần Ctrl-C cho đường dọn dẹp mới của `run.c`.
+  Đọc tĩnh: handler chỉ gọi `kill()`; `cgroup_kill` + `cgroup_cleanup` chạy sau `waitpid`,
+  `cgroup_cleanup` retry `rmdir` 20 × 100 ms nên không cần `usleep(1500000)` cũ.
+- Soak 24 h.
