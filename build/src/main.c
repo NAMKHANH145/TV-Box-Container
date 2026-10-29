@@ -1,7 +1,7 @@
 /* main.c — dispatch lenh: run/ps/stats/stop/rm/oci-run */
 #include "common.h"
 
-#define VERSION "1.2.0"
+#define VERSION "1.3.0"
 
 #if defined(__aarch64__)
 #define MC_ARCH "aarch64"
@@ -68,6 +68,12 @@ int main(int argc, char **argv) {
 		if (an < 0) return 1;
 		argc = an;
 		argv = av;
+	}
+	if (argc >= 4 && strcmp(argv[1], "exec") == 0)
+		return do_exec(argv[2], &argv[3]);
+	if (argc == 3 && strcmp(argv[1], "exec") == 0) {
+		fprintf(stderr, "Usage: %s exec <id> <cmd> [args...]\n", argv[0]);
+		return 1;
 	}
 	if (argc >= 2 && strcmp(argv[1], "service") == 0 && argc >= 4 && strcmp(argv[2], "create") == 0) {
 		return do_service_create(argc, argv);

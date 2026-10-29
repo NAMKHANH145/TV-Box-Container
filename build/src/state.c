@@ -256,6 +256,7 @@ int do_rm(const char *id, int force) {
 	snprintf(f, sizeof f, "%s/cgdir", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/cmd", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/rootfs", dir); unlink(f);
+	snprintf(f, sizeof f, "%s/ip", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/watchdog", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);

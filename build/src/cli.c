@@ -40,7 +40,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 
 void print_usage(const char *prog) {
 	fprintf(stderr, "Usage: %s run [--ram=30M] [--cpu=20] [--pids=64] [--io=1M] [--disk=100M] [--detach|-d] [--name=ID]\n"
-		"                  [--net=host|isolated] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
-		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | oci-run <bundle> |\n"
-		"       %s service create <name> <cmd> [args...] | --version\n", prog, prog, prog);
+		"                  [--net=host|isolated|bridge] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
+		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
+		"       %s oci-run <bundle> | service create <name> <cmd> [args...] | --version\n", prog, prog, prog);
 }

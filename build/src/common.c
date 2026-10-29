@@ -61,11 +61,9 @@ int valid_name(const char *s) {
 }
 
 void validate_input(struct cfg *c) {
-	if (c->net && strcmp(c->net, "host") != 0 && strcmp(c->net, "isolated") != 0) {
-		if (strcmp(c->net, "bridge") == 0)
-			die_msg("--net=bridge chua ho tro (R5-3); dung host hoac isolated");
-		die_msg("--net chi duoc phep la host hoac isolated");
-	}
+	if (c->net && strcmp(c->net, "host") != 0 && strcmp(c->net, "isolated") != 0
+	    && strcmp(c->net, "bridge") != 0)
+		die_msg("--net chi duoc phep la host, isolated hoac bridge");
 	if (c->rootfs && strcmp(c->rootfs, "/") == 0)
 		die_msg("--rootfs phai la duong dan khac /");
 	if (c->name && !valid_name(c->name))

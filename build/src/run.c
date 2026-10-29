@@ -73,7 +73,8 @@ int do_run(struct cfg *c) {
 	if (!stack) die("malloc stack");
 
 	int flags = SIGCHLD | CLONE_NEWPID | CLONE_NEWNS | CLONE_NEWUTS | CLONE_NEWIPC | CLONE_NEWUSER;
-	if (strcmp(c->net, "isolated") == 0) flags |= CLONE_NEWNET;
+	if (strcmp(c->net, "isolated") == 0 || strcmp(c->net, "bridge") == 0)
+		flags |= CLONE_NEWNET;
 
 	struct child_arg carg = { .c = c, .go_rd = gofd[0], .ready_wr = readyfd[1],
 	                         .detach = c->detach };
@@ -99,8 +100,23 @@ int do_run(struct cfg *c) {
 	userns_map(child);
 	cgroup_attach(cgdir, child);
 
+	/* --net=bridge: tao veth, move vao netns con, roi moi "go" de con tu
+	 * cau hinh interface (con can netns da co san veth cua no). */
+	struct bridge_cfg bc;
+	int have_bc = 0;
+	if (strcmp(c->net, "bridge") == 0) {
+		if (bridge_setup(child, &bc) < 0) {
+			kill(child, SIGKILL);
+			waitpid(child, NULL, 0);
+			cgroup_cleanup(c, cgdir);
+			die_msg("--net=bridge that bai (can iproute2 + quyen root + module veth/bridge)");
+		}
+		have_bc = 1;
+	}
+
 	/* Bao con chay tiep */
 	if (write(gofd[1], "x", 1) != 1) die("go write");
+	if (have_bc && write(gofd[1], &bc, sizeof bc) != (ssize_t)sizeof bc) die("go bridge write");
 	close(gofd[1]);
 
 	/* Detach: khong waitpid, khong don cgroup — ghi state roi thoat.
@@ -136,6 +152,10 @@ int do_run(struct cfg *c) {
 		}
 		snprintf(f, sizeof f, "%s/rootfs", dir);
 		write_file(f, c->rootfs);
+		if (have_bc) {
+			snprintf(f, sizeof f, "%s/ip", dir);
+			write_file(f, bc.ip);
+		}
 
 		/* Watchdog detached: 1 process/container, tu thoat khi container chet.
 		 * Chi ton tai khi dung --disk hoac --health-cmd (khong co daemon thuong truc). */
@@ -216,6 +236,7 @@ int do_run(struct cfg *c) {
 	}
 
 	cgroup_cleanup(c, cgdir);
+	if (have_bc) bridge_teardown(child);
 	free(stack);
 	if (disk_killed) return 128 + SIGKILL;
 	return WIFEXITED(status) ? WEXITSTATUS(status) : 1;

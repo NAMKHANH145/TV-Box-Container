@@ -54,6 +54,14 @@ struct child_arg {
 	char cgdir[PATH_MAX];
 };
 
+/* --net=bridge: parent tao veth + move vao netns, child tu cau hinh ioctl. */
+struct bridge_cfg {
+	char peer[16];
+	char ip[16];
+	char gw[16];
+	int prefix;
+};
+
 void die(const char *msg);
 void die_msg(const char *msg);
 long parse_bytes(const char *s);
@@ -77,6 +85,7 @@ int do_stats(const char *id, int json);
 int do_ps(int json);
 int do_stop(const char *id, int timeout);
 int do_rm(const char *id, int force);
+int do_exec(const char *id, char **cmd);
 
 int oci_to_argv(const char *bundle, char **av, int maxav);
 void parse_args(int argc, char **argv, struct cfg *c);
@@ -100,3 +109,8 @@ long long disk_usage(const char *path);
 void container_watchdog_detached(long limit, const char *rootfs, const char *cgdir,
                                  const char *statedir, long long baseline,
                                  const char *health_cmd);
+
+/* R5-3: --net=bridge (mcbr0 + veth, khong daemon, khong NAT). */
+int bridge_setup(pid_t child, struct bridge_cfg *bc);
+void bridge_teardown(pid_t child);
+int bridge_configure(const struct bridge_cfg *bc);
