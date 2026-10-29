@@ -6,7 +6,7 @@ so sánh với SOTA và giới hạn. Cách dùng CLI xem `GUIDE.md`; lịch s�
 nhật ký từng phase xem `progress/`.
 
 **Tóm tắt một dòng:** `minicontainer` là engine container zero-daemon viết bằng C, musl static
-(136.712 B bản Buildroot / 125.392 B asset CI, aarch64), 14 module / 2.209 dòng, chạy trên
+(144.904 B bản Buildroot / 125.392 B asset CI v1.4.0, aarch64), 15 module / 2.430 dòng, chạy trên
 Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** trên box thật.
 
 ---
@@ -15,7 +15,7 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 
 | Artifact | Nội dung |
 |---|---|
-| `minicontainer` | 1 binary static, 0 daemon, ~125–137 KB |
+| `minicontainer` | 1 binary static, 0 daemon, ~145 KB (Buildroot) / 125 KB (asset CI v1.4.0) |
 | `build/test.sh` | 74 case tự động (cô lập, cgroup, seccomp, exec, bridge, read-only, pull, cleanup) |
 | `build/soak.sh` | chạy vòng lặp, kiểm rò cgroup/mount/state, theo dõi `MemAvailable` |
 | `build/bench.sh` | đo p50/p95/p99 và so sánh Docker trên cùng box |
@@ -75,9 +75,9 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 
 | Module | Dòng | Trách nhiệm |
 |---|---:|---|
-| `main.c` | 91 | dispatch `run/ps/stats/stop/rm/exec/oci-run/service/pull/--version` |
-| `cli.c` | 46 | `getopt` tự viết, nhận cả `--ram 30M` và `--ram=30M`, validate đầu vào |
-| `common.c/.h` | 96+116 | `die()`, `parse_bytes()` (K/M/G nhị phân), đọc/ghi file, `struct cfg`, hằng số |
+| `main.c` | 103 | dispatch `run/ps/stats/stop/rm/exec/oci-run/service/pull/sdk/--version` |
+| `cli.c` | 51 | `getopt` tự viết, nhận cả `--ram 30M` và `--ram=30M`, validate đầu vào |
+| `common.c/.h` | 141+122 | `die()`, `parse_bytes()`, `valid_name`, `run_wait`/`run_capture`, `struct cfg` |
 | `ns.c` | 218 | thân tiến trình con: mount private, chroot/chdir, `/proc`, `/dev`, `--read-only`, uid_map |
 | `run.c` | 243 | supervisor: clone → pipe “go” → attach cgroup → wait/detach, watchdog disk/health, forward tín hiệu |
 | `exec.c` | 124 | `setns()` user→net/uts/ipc→mnt→pid, `O_PATH /proc/<pid>/root`, fork, seccomp, attach cgroup |
@@ -88,8 +88,8 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 | `oci.c` | 129 | đọc `config.json` → argv/flags (subset: process, root, hostname, limits) |
 | `state.c` | 265 | `ps/stats/stop/rm`, `--json`, `--timeout`, đọc state + cgroupfs, không daemon |
 | `systemd.c` | 53 | sinh unit `/etc/systemd/system/minicontainer-<name>.service` |
-| `pull.c` | 332 | tải profile, `statvfs`, sha256, validate tar, staging + rename atomic |
-| `common.h` | — | dùng chung (không tính vào 2.209 dòng .c) |
+| `pull.c` | 291 | tải profile, `statvfs`, sha256, validate tar, staging + rename atomic |
+| `sdk.c` | 328 | `sdk init` (skeleton dự án) + `sdk pack` (nftw validate → tar → `.sha256`) |
 
 `build/Makefile`: `make` (cross musl), `make tools` (bomb/breakout), `make deploy BOX=…`,
 `make clean`.
@@ -293,6 +293,22 @@ không quản lý container thường trú).
 annotations → dựng argv cho `run`. Không hỗ trợ `mounts`, `hooks`, seccomp profile OCI; key ngoài subset
 bị cảnh báo chứ không im lặng.
 
+### 6.10. `sdk init` / `sdk pack` (v1.5.0)
+
+Chiều ngược lại của `pull`: đóng gói rootfs của người dùng thành đúng định dạng `pull` nhận.
+
+```
+sdk init <dir>   → <dir>/{rootfs/, mc.conf, README.md}; từ chối nếu <dir> đã có nội dung
+sdk pack <dir>   → nftw(FTW_PHYS) validate symlink lexically
+                 → tar -czf OUT -C rootfs --numeric-owner --owner=0 --group=0 .
+                 → <OUT>.sha256  ("<hash>  <tên file>")
+```
+
+Quy tắc: member tương đối nên `check_tar()` của `pull` chấp nhận; `+x` do tar giữ; symlink tuyệt đối
+(`/bin/busybox`) hợp lệ, symlink tương đối chỉ bị từ chối khi đi ra ngoài gốc rootfs. Không thêm daemon
+hay process nào — vẫn là 1 binary. `run_wait`/`run_capture` (trước là static trong `pull.c`) nay ở
+`common.c` để cả `pull.c` và `sdk.c` dùng chung.
+
 ---
 
 ## 7. Bảng bẫy kernel đã gặp và cách xử lý
@@ -321,7 +337,8 @@ bị cảnh báo chứ không im lặng.
 
 ### 8.1. Suite tự động
 
-`bash build/test.sh` trên box: **74/74 PASS** (v1.4.0), gồm:
+`bash build/test.sh` trên box: **74/74 PASS** (v1.4.0). Suite hiện có **84 case** (thêm 10 case `sdk`
+ở v1.5.0; 10 case này đã chạy trên laptop vì `sdk` không cần root/quyền container):
 cô lập PID/UTS/fs, cgroup memory/cpu/pids/io, seccomp, breakout (chroot escape), userns, `/dev`,
 detach + state + stats, `exec` (uid/PID/seccomp/cgroup/id sai), bridge (IP, ping, veth cleanup),
 `--read-only` (8 case), `pull` (11 case), cleanup (cgroup/mount/state = 0).
@@ -425,7 +442,7 @@ dù chỉ ~2.200 dòng C. Không cạnh tranh OCI đầy đủ (không chạy im
 - Không volumes/bind-mount tuỳ ý, không log driver (stdout → state dir khi `-d`).
 - Không checkpoint/restore, không live-migrate, không SELinux/AppArmor.
 - `--disk` là watchdog 1 s, không phải quota kernel.
-- Chưa có `mc-sdk` (nhúng vào app khác).
+- `sdk` là công cụ đóng gói, **không** phải thư viện nhúng (không có API C cho app khác).
 - Board thật mới có aarch64; 3 arch còn lại mới verify bằng QEMU-user.
 
 **Đã khắc phục (đều có test):** Ctrl-C để lại con mồ côi → forward tín hiệu + `cgroup.kill`;
@@ -442,7 +459,7 @@ thiếu quota → `--disk` + `RLIMIT_FSIZE`; validate đầu vào; phủ `--cpu`
 | 2 | Soak 24 h | `ITER=117000 bash build/soak.sh` |
 | 3 | Verify 4 asset musl trên phần cứng thật | mới aarch64 build local |
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | chưa có |
-| 5 | `mc-sdk` (`init`/`pack`) | chưa làm |
+| 5 | `sdk init/pack` (tên cũ `mc-sdk`) | ✅ v1.5.0, 10 test trong `test.sh` |
 | 6 | LICENSE | chưa chọn (MIT / Apache-2.0) |
 | 7 | Bridge NAT + DNS + port mapping | cân nhắc chi phí CPU |
 
@@ -455,6 +472,7 @@ Hệ thống đạt mục tiêu đề tài: tự gọi syscall Linux (`clone`, `
 (Process Management, Memory Management, File System, Namespaces, Cgroups), chạy được trên phần cứng
 hạn chế, zero-daemon, có số liệu đo thật và test tự động trên box.
 
-**Bottom line:** 14 module, 2.209 dòng C, zero-daemon. Toàn bộ backlog R5 (health, `exec`, bridge,
-`--read-only`, `pull`) đã xong và verify trên phần cứng; 4/4 profile chạy thật. Phần còn lại là việc
-hạ tầng (soak 24 h, runner tự host, `mc-sdk`), không phải tính năng runtime.
+**Bottom line:** 15 module, 2.430 dòng C, zero-daemon, 1 binary static. Toàn bộ backlog R5 (health,
+`exec`, bridge, `--read-only`, `pull`, `sdk`) đã xong; phần runtime verify trên phần cứng thật,
+`sdk` verify bằng test tự động (không cần root). Phần còn lại là việc hạ tầng (soak 24 h, runner tự
+host, LICENSE), không phải tính năng runtime.

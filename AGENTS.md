@@ -2,7 +2,8 @@
 
 > Đọc file này trước khi làm bất cứ gì. Đây là dự án container runtime zero-daemon bằng C cho
 > TV Box Amlogic S905W (aarch64, 1.8 GB RAM, Ubuntu 26.04, kernel `6.18.38-meson64`).
-> Trạng thái: **v1.4.0**, `test.sh` **74/74 PASS** trên phần cứng thật, nhánh `main` đã push.
+> Trạng thái: **v1.5.0** (tag `v1.4.0` đã phát hành) · `test.sh` **84 case** (74/74 PASS trên phần
+> cứng thật ở v1.4.0) · nhánh `main` đã push.
 
 ## 1. Thứ tự đọc (khoảng 25 phút)
 
@@ -20,10 +21,10 @@
 ## 2. Cây làm việc
 
 ```
-build/src/*.c        14 module (main, cli, common, ns, run, exec, bridge, cgroup,
-                     disk, seccomp, oci, state, systemd, pull) — ~2.209 dòng
+build/src/*.c        15 module (main, cli, common, ns, run, exec, bridge, cgroup,
+                     disk, seccomp, oci, state, systemd, pull, sdk) — ~2.430 dòng
 build/Makefile       make / make tools / make deploy BOX=… SSHPASS_FILE=… / make clean
-build/test.sh        74 case, phải xanh trước mọi PR
+build/test.sh        84 case, phải xanh trước mọi PR
 build/soak.sh        ITER=… (24 h ≈ ITER=117000), kiểm rò cgroup/mount/state
 build/bench.sh       độ trễ + so sánh Docker
 build/release.sh     tarball + SHA256SUMS, version đọc từ src/main.c
@@ -83,14 +84,14 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 
 ## 6. Việc tiếp theo (theo thứ tự)
 
-1. Tag `v1.4.0` + release (cần người quyết): `bash build/release.sh` rồi tag; sau đó tải asset
-   aarch64 về box chạy `test.sh` để đóng R5-1.
-2. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
-3. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64).
+1. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
+2. Tag `v1.5.0` sau soak: `bash build/release.sh` rồi tag (hỏi trước — shared state).
+3. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local).
 4. Self-hosted runner aarch64 chạy `test.sh` trước release.
-5. `mc-sdk init/pack` (pack tạo tar.gz member tương đối, giữ `+x`, không symlink vượt root).
-6. LICENSE (MIT hoặc Apache-2.0).
-7. Bridge NAT/DNS/port mapping — chỉ làm khi có nhu cầu thật.
+5. Bridge NAT/DNS/port mapping — chỉ làm khi có nhu cầu thật.
+6. `profiles/build.sh --clean` + kiểm dung lượng trước build.
+
+Đã xong 2026-10-30: tag `v1.4.0`, `sdk init/pack` + 10 test, LICENSE MIT, `test.sh` tự in tổng case.
 
 ## 7. Bàn giao nhanh
 

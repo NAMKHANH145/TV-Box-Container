@@ -1,6 +1,6 @@
 # TASK.md — Phân chia công việc nhóm 4 người
 
-> Cập nhật: 2026-10-30 · Phiên bản: **v1.4.0** · Test trên box: **74/74 PASS**
+> Cập nhật: 2026-10-30 · Phiên bản: **v1.5.0** · Test trên box: **74/74 PASS** (v1.4.0) · Suite: **84 case**
 > Repo: <https://github.com/NAMKHANH145/TV-Box-Container>
 > Tài liệu nền: `PLAN.md` (lộ trình), `GUIDE.md` (cách dùng), `FINAL.md` (kiến trúc),
 > `progress/` (nhật ký phase + bằng chứng đo).
@@ -15,13 +15,13 @@ Dự án đã hoàn thành phần runtime; §7 là phần việc còn lại đã
 | Hạng mục | Trạng thái |
 |---|---|
 | Runtime (namespace, cgroup, seccomp, disk quota) | ✅ chạy thật trên TV Box S905W |
-| 74 test case (`build/test.sh`) | ✅ **74/74 PASS** (2026-10-29, v1.4.0) |
-| CLI `run/ps/stats/stop/rm/exec/oci-run/service/pull` | ✅ đủ |
+| `build/test.sh` **84 case** | 🟡 74/74 PASS trên box (v1.4.0); 10 case `sdk` mới chạy trên laptop |
+| CLI `run/ps/stats/stop/rm/exec/oci-run/service/pull/sdk` | ✅ đủ |
 | `--net=host\|isolated\|bridge` | ✅ bridge: 2 container ping nhau, HTTP 200, MQTT 3 container |
 | `--read-only`, `pull`, `/dev` tự tạo, health detached | ✅ v1.3.0–v1.4.0 |
 | 4 rootfs profile | ✅ base-mini 1.3 MB, web-proxy 2.6 MB, iot-gateway 14.1 MB, python-edge 22.2 MB |
 | CI GitHub Actions | ✅ 4/4 arch musl (100.704–125.392 B), gate >200 KB fail (run `40857971212`) |
-| Release `v1.3.0` | ✅ phát hành thật (run `40851398981`), asset aarch64 pass 55/55 trên box |
+| Release | ✅ `v1.3.0` phát hành thật; **`v1.4.0` tag 2026-10-30** (CI dựng 4 asset musl) |
 | Soak | 🟡 800 vòng/588 s: 0 lỗi 0 leak; **24 h chưa chạy** |
 
 **Nguyên tắc:** mọi task phải có (1) code, (2) test trong `build/test.sh` hoặc test riêng,
@@ -29,7 +29,7 @@ Dự án đã hoàn thành phần runtime; §7 là phần việc còn lại đã
 
 ---
 
-## 2. Bản đồ module (14 module, ~2.209 dòng C)
+## 2. Bản đồ module (15 module, ~2.430 dòng C)
 
 | # | File | Dòng | Nhiệm vụ | Độ khó |
 |---|---|---:|---|---|
@@ -46,9 +46,10 @@ Dự án đã hoàn thành phần runtime; §7 là phần việc còn lại đã
 | 11 | `src/oci.c` | 129 | đọc `config.json` (subset OCI) | Trung bình |
 | 12 | `src/state.c` | 265 | `ps/stats/stop/rm` từ `/run/minicontainer/<id>` | Trung bình |
 | 13 | `src/systemd.c` | 53 | sinh unit `service create` | Dễ |
-| 14 | `src/pull.c` | 332 | tải/verify/giải nén profile an toàn | Trung bình |
+| 14 | `src/pull.c` | 291 | tải/verify/giải nén profile an toàn | Trung bình |
+| 15 | `src/sdk.c` | 328 | `sdk init` skeleton + `sdk pack` (validate symlink → tar → `.sha256`) | Trung bình |
 
-Thứ tự đọc cho người mới: **main → cli → common → state → pull → run → cgroup → ns → bridge →
+Thứ tự đọc cho người mới: **main → cli → common → state → pull → sdk → run → cgroup → ns → bridge →
 exec → seccomp → disk → oci → systemd**. `run.c` sớm vì nó gọi gần như mọi thứ; `ns.c`/`exec.c`
 cuối vì chứa ràng buộc khó nhất (userns, setns, mount).
 
@@ -63,53 +64,75 @@ progress/         PHASE1..16.md + VERIFICATION_LOG.md
 
 ---
 
-## 3. Chia việc — 4 track
+## 3. Chia việc — 4 người (1 người code, 3 người phần rìa)
 
-Mỗi track có 1 owner chính. Bảng dưới là **phân công đã thực hiện** (dùng làm mẫu khi chia lại
-hoặc khi bảo vệ: ai làm gì). Cột "Trạng thái" phản ánh kết quả thực tế.
+Nguyên tắc: **chỉ một người chạm code** (`build/src/**`, `build/test.sh`, `.github/**`). Ba người còn
+lại chỉ **đọc, chạy, đo, viết** — nộp bằng chứng (log + đường dẫn file), không commit code, không tag
+release, không sửa box.
 
-### Track A — Core runtime (C) · owner: Khánh
+| Track | Người | Việc chính | Nộp gì | Thời lượng | Phụ thuộc |
+|---|---|---|---|---|---|
+| **A — Code & runtime** | **Khánh** | Toàn bộ `src/` (14+1 module); `sdk init/pack`; sửa bug; review mọi PR; quyết định release | commit + số PASS | **~70%** | box để verify |
+| **B — Phát hành & hạ tầng** | **Huy** | Checklist release theo tag; so sánh MIT vs Apache-2.0 (1 trang); theo dõi CI 4 arch + chụp log; tải 4 asset musl, chạy `--version`/`ps` bằng `qemu-*-static`, ghi bảng | `progress/RELEASE-vX.md` + log CI + bảng verify asset | 4–6 h | Khánh bấm tag (shared state) |
+| **C — QA & bằng chứng** | **Dev C** | Soak `ITER=117000` trên box (chạy đêm, báo mỗi 2 h); `bench.sh` 3 lần; `test.sh` 3 lần liền; chạy lại bộ security (bomb/breakout/mount/ptrace) | bảng số + log thô, đúng dạng "lệnh → kết quả", ghi vào `progress/VERIFICATION_LOG.md` | 8–10 h (phần lớn là chờ) | box online |
+| **D — Tài liệu, demo, báo cáo** | **Dev D** | Slide 15–18 trang từ `FINAL.md` (3 hình: sơ đồ tầng, luồng `run`, bảng so sánh); video demo 5 phút chạy thật; soát `GUIDE.md` bằng cách làm như người mới; viết báo cáo môn học | `.pptx`/PDF + video + danh sách lỗi tài liệu | 10–12 h | cần box để quay demo |
+
+### Ba người B/C/D **không** được làm
+
+- Sửa/xoá file trong `build/src/`, `build/test.sh`, `.github/`.
+- Tự `git tag`, `gh release create`, đăng ký self-hosted runner (shared state — `AGENTS.md` §3).
+- Chạy `sdk pack`/`--net=bridge` trên box khi Khánh chưa báo "box trống".
+- Viết IP/mật khẩu thật vào tài liệu, slide hay commit — luôn dùng `<IP_BOX>`.
+
+### Nhịp làm việc
+
+2 buổi/tuần × 15 phút. Mỗi người 1 dòng: *đã làm gì → bằng chứng ở đâu → đang chặn gì*.
+Task P0 trễ → cắt P2 trước, **không** cắt test và không hạ số PASS.
+
+### Bảng task theo track (trạng thái thật)
+
+**Track A — Core runtime (C) · Khánh**
 
 | ID | Việc | Ưu tiên | Trạng thái |
 |---|---|---|---|
-| A1 | Health check cho `-d`: watchdog `--health-cmd` mỗi 5 s, marker `health_failed`, kill cgroup | P0 | ✅ |
-| A2 | `exec <id> <cmd>` bằng `setns` thuần C (không `nsenter`) | P1 | ✅ 5 test |
-| A3 | `--net=bridge`: `mcbr0` + veth, cấu hình bằng ioctl | P2 | ✅ 6 test, HTTP 200 |
-| A4 | Rà seccomp cho arch mới, thêm syscall có test | P2 | ✅ filter dùng `__NR_*` portable |
-| A5 | Bridge + NAT/DNS/port mapping ra LAN | P3 | ⬜ chưa làm (§7) |
-| A6 | `--read-only` + tmpfs `/tmp` `/run` `/dev/shm` | P1 | ✅ 8 test |
-| A7 | `pull <profile>` an toàn (sha256, chặn tar xấu, atomic) | P1 | ✅ 11 test |
+| A1 | Health check cho `-d`: watchdog `--health-cmd` 5 s, marker `health_failed`, kill cgroup | P0 | ✅ |
+| A2 | `exec <id> <cmd>` bằng `setns` thuần C (không `nsenter`) | P1 | ✅ |
+| A3 | `--net=bridge`: `mcbr0` + veth bằng ioctl | P2 | ✅ |
+| A4 | Seccomp theo `__NR_*` portable 4 arch | P2 | ✅ |
+| A5 | Bridge NAT/DNS/port mapping ra LAN | P3 | ⬜ (§7) |
+| A6 | `--read-only` + tmpfs `/tmp` `/run` `/dev/shm` | P1 | ✅ |
+| A7 | `pull <profile>` an toàn (sha256, chặn tar xấu, atomic) | P1 | ✅ |
+| A8 | `sdk init` / `sdk pack` (tên cũ `mc-sdk`) | P1 | ✅ v1.5.0, 10 test |
 
-### Track B — Rootfs, build & release · owner: Huy
+**Track B — Rootfs, build & release · Huy**
 
 | ID | Việc | Ưu tiên | Trạng thái |
 |---|---|---|---|
-| B1 | Build 3 profile động (web-proxy, python-edge, iot-gateway) | P0 | ✅ cả 3 chạy container thật |
-| B2 | CI 4 arch xanh + release theo tag | P0 | ✅ `v1.3.0` phát hành; asset musl ở `v1.4.0` (chưa tag) |
+| B1 | Build 3 profile động (web-proxy, python-edge, iot-gateway) | P0 | ✅ |
+| B2 | CI 4 arch xanh + release theo tag | P0 | ✅ `v1.4.0` tag 2026-10-30 |
 | B3 | `release.sh` tarball + `SHA256SUMS.txt` | P1 | ✅ |
-| B4 | `profiles/build.sh`: `--clean`, kiểm dung lượng trước build | P2 | ⬜ chưa làm |
-| B5 | Cache toolchain CI / self-hosted runner | P2 | ⬜ chưa làm (§7) |
+| B4 | `profiles/build.sh`: `--clean`, kiểm dung lượng trước build | P2 | ⬜ |
+| B5 | Cache toolchain CI / self-hosted runner | P2 | ⬜ (§7) |
 
-### Track C — Test, an ninh & độ bền · owner: Dev C
-
-| ID | Việc | Ưu tiên | Trạng thái |
-|---|---|---|---|
-| C1 | Mở rộng `test.sh` lên 74 case | P0 | ✅ 74/74, chạy 3 lần liền xanh |
-| C2 | Soak 24 h | P1 | 🟡 script xong; 800 vòng/588 s đã có; 24 h chưa chạy |
-| C3 | Security regression: bomb, breakout, mount, ptrace, `open_by_handle_at` | P1 | ✅ mọi vector bị chặn |
-| C4 | Test đa kiến trúc | P2 | ✅ aarch64 thật; x86_64 native; armv7l/riscv64 QEMU |
-
-### Track D — Tài liệu, demo & báo cáo · owner: Dev D
+**Track C — Test, an ninh & độ bền · Dev C**
 
 | ID | Việc | Ưu tiên | Trạng thái |
 |---|---|---|---|
-| D1 | Hướng dẫn cho người mới (nay là `GUIDE.md`) | P0 | ✅ |
-| D2 | `profiles/README.md`: 4 profile, static vs dynamic, cách build | P0 | ✅ |
-| D3 | Demo 5 phút (asciinema/video) | P1 | ⬜ chưa làm |
-| D4 | Báo cáo/số liệu khớp bằng chứng (nay là `FINAL.md`) | P1 | ✅ |
-| D5 | Gộp 26 tài liệu → 4 file + `progress/` | P1 | ✅ 2026-10-30 |
+| C1 | `test.sh` mở rộng (nay **84 case**) | P0 | 🟡 74/74 trên box; 10 case `sdk` mới chạy trên laptop |
+| C2 | Soak 24 h | P1 | 🟡 800 vòng/588 s sạch; 24 h chưa chạy |
+| C3 | Security regression (bomb, breakout, mount, ptrace, `open_by_handle_at`) | P1 | ✅ |
+| C4 | Test đa kiến trúc | P2 | ✅ aarch64 + x86_64 native; armv7l/riscv64 QEMU |
 
----
+**Track D — Tài liệu, demo & báo cáo · Dev D**
+
+| ID | Việc | Ưu tiên | Trạng thái |
+|---|---|---|---|
+| D1 | `GUIDE.md` cho người mới | P0 | ✅ |
+| D2 | `profiles/README.md`: 4 profile, static vs dynamic | P0 | ✅ |
+| D3 | Demo 5 phút (asciinema/video) | P1 | ⬜ |
+| D4 | Báo cáo/số liệu khớp bằng chứng (`FINAL.md`) | P1 | ✅ |
+| D5 | Gộp 26 tài liệu → 4 file + `progress/` | P1 | ✅ |
+| D6 | LICENSE + README license | P1 | ✅ MIT (2026-10-30) |
 
 ## 4. Mốc thời gian đã đi qua
 
@@ -172,14 +195,16 @@ CI musl + 74 test (v1.4.0).
 
 | # | Việc | Track | Ghi chú |
 |---|---|---|---|
-| 1 | Tag + phát hành `v1.4.0` | B | `bash release.sh` rồi tag; CI dựng asset musl; sau đó tải asset aarch64 chạy `test.sh` đóng R5-1. **Cần Khánh quyết** (shared state) |
-| 2 | Soak 24 h | C | `ITER=117000 bash build/soak.sh` (1.36 vòng/s) — ghi số vào `progress/VERIFICATION_LOG.md` |
-| 3 | Verify asset musl 4 arch trên phần cứng thật | C | mới aarch64 build local |
+| 1 | Soak 24 h | C | `ITER=117000 bash build/soak.sh` (1.36 vòng/s) — ghi số vào `progress/VERIFICATION_LOG.md` |
+| 2 | Tag + phát hành `v1.5.0` | B | sau khi soak xong: `bash build/release.sh` rồi `git tag v1.5.0`; CI dựng 4 asset musl |
+| 3 | Verify 4 asset musl trên phần cứng thật | C | mới aarch64 build local; qemu cho 3 arch còn lại |
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |
-| 5 | `mc-sdk init/pack` | A | `pack` tạo `<profile>-rootfs.tar.gz` đúng định dạng `pull` nhận (member tương đối, giữ `+x`); `init` sinh skeleton |
-| 6 | LICENSE | D | chọn MIT hoặc Apache-2.0; README đang ghi "to be decided" |
-| 7 | Bridge NAT + DNS + port mapping | A | cân nhắc chi phí CPU trên S905W |
-| 8 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
+| 5 | Bridge NAT + DNS + port mapping | A | cân nhắc chi phí CPU trên S905W; chỉ làm khi có nhu cầu thật |
+| 6 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
+| 7 | `profiles/build.sh --clean` + kiểm dung lượng trước build | B | P2 |
+
+Đã xong 2026-10-30: tag `v1.4.0` (CI dựng asset musl), `sdk init/pack` + 10 test, LICENSE MIT,
+test.sh tự in tổng số case.
 
 ## 8. Việc chưa nên làm (tránh phân tâm)
 

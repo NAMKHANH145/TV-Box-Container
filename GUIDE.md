@@ -283,6 +283,8 @@ kiểm tra dung lượng trống ≥ 4× file; `--sha256` so khớp trước khi
 `..` bị **từ chối**; giải nén vào thư mục staging `.mc-pull-*` rồi rename atomic; `--dest` đã tồn tại thì
 chỉ thay khi có `--force`.
 
+Đóng gói rootfs của bạn thành đúng định dạng này: xem §5.14 (`sdk pack`).
+
 ### 5.9. `oci-run <bundle>`
 
 ```bash
@@ -325,6 +327,36 @@ lượng dưới rootfs mỗi giây (baseline + delta) và `cgroup.kill` khi vư
 
 Chạy **trên host** bằng `system()` mỗi 5 s. Exit ≠ 0 → kill cgroup; detached ghi marker `health_failed`.
 Muốn kiểm tra bên trong container thì dùng `exec` trong một script wrapper.
+
+### 5.14. `sdk init` / `sdk pack` (đóng gói rootfs)
+
+Tên cũ trong tài liệu là `mc-sdk`; nay là subcommand của chính binary, không thêm file thứ hai.
+
+```bash
+# 1. Sinh skeleton dự án
+minicontainer sdk init my-app --profile=iot-gateway --ram=64M --cpu=30 --disk=100M
+#    -> my-app/{rootfs/, mc.conf, README.md}
+
+# 2. Chép rootfs vào (hoặc pull sẵn)
+tar -xzf iot-gateway-rootfs.tar.gz -C my-app/rootfs
+#    hoặc: minicontainer pull iot-gateway --dest=./my-app/rootfs
+
+# 3. Đóng gói: -> proj-rootfs.tar.gz + .sha256
+minicontainer sdk pack my-app
+#   proj-rootfs.tar.gz.sha256 chứa "<sha256>  proj-rootfs.tar.gz"
+
+# 4. Phân phối: đặt file lên web server rồi
+minicontainer pull my-app --url=https://images.example.com/rootfs --sha256=<sum>
+```
+
+Quy tắc `pack`:
+
+- Member trong tar **luôn tương đối** (`./bin/...`), giữ nguyên bit `+x`, owner 0 — đúng định dạng `pull` nhận.
+- **Từ chối** symlink vượt khỏi gốc rootfs (`../../etc/passwd`), kiểm tra lexically; symlink tuyệt đối
+  (`/bin/busybox`) và symlink tương đối vẫn nằm trong rootfs (`usr/bin/x -> ../../bin/y`) được giữ.
+- Không ghi đè file đã có nếu thiếu `--force`; cảnh báo nếu rootfs thiếu `/bin/sh`.
+- `-o/--output` phải có tên `<profile>-rootfs.tar.gz` để `pull` tìm đúng; nếu không, `pack` cảnh báo và
+  gợi ý profile theo tên thư mục.
 
 ---
 

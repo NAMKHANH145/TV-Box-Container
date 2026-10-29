@@ -326,3 +326,58 @@ Dữ liệu soak dài nhất đã có: 800 vòng liên tục / 588s, 0 lỗi 0 l
   `apt-get clean` + `rm -rf /var/lib/apt/lists/*` + journal vacuum 20M →
   `/var` 701 MB → 333 MB. Disk 27 % → 23 % (8.1 GB trống). Không đụng
   `/root/hass`, `vendor-aml-uboot-backup.img`, `aml-*.sh`, `/opt/containerd`.
+
+---
+
+## v1.5.0 — `sdk init/pack` + tag `v1.4.0` (2026-10-30)
+
+Box S905W **không truy cập được** trong phiên này (`ssh root@<IP_BOX>` timeout — Tailscale/NAT),
+nên toàn bộ phần dưới là đo trên **laptop**, không phải trên box. Không có tuyên bố nào về phần
+cứng trong mục này.
+
+### Build (laptop, toolchain Buildroot musl)
+
+```
+cd build && make clean && make
+aarch64-buildroot-linux-musl-gcc -static -O2 -Wall -o minicontainer src/*.c   (15 file .c)
+-rwxr-xr-x 1 ... 144904 minicontainer
+file: ELF 64-bit LSB executable, ARM aarch64, statically linked, stripped
+./minicontainer --version  ->  minicontainer 1.5.0 (aarch64, musl, static)   (chạy qua binfmt/qemu-user)
+warning: 0
+```
+
+Binary tăng 136.712 → **144.904 B** (+8.192 B cho `sdk`); vẫn dưới gate 200 KB của CI.
+
+### `sdk` — 9/9 check (không cần root, không cần namespace)
+
+| # | Lệnh | Kết quả |
+|---|---|---|
+| 1 | `sdk init /tmp/sdkcheck/proj --profile=base-mini` | tạo `rootfs/` + `mc.conf` + `README.md` |
+| 2 | `grep '^ram=32M' mc.conf` | đúng mặc định |
+| 3 | `sdk init` lại trên thư mục không rỗng | từ chối, exit 1 |
+| 4 | `sdk pack proj -o dist/proj-rootfs.tar.gz` | tạo tar.gz; ghi `.sha256` (dạng `sha256sum`) |
+| 5 | `tar -tzf … \| grep -c '^/'` | **0** (mọi member tương đối) |
+| 6 | `tar -tzvf … \| grep '^-rwx.*bin/busybox'` | giữ bit `+x` |
+| 7 | `sha256sum -c proj-rootfs.tar.gz.sha256` | OK |
+| 8 | `sdk pack` lại khi file đã tồn tại, không `--force` | từ chối, exit 1 |
+| 9 | symlink `escape -> ../../etc/passwd` rồi `sdk pack` | từ chối, exit 1 |
+
+Round-trip: `sdk pack` → `pull proj --url=<dir> --sha256=<sum> --force` → giải nén đúng nội dung,
+`bin/sh` vẫn `-rwxrwxr-x`. Symlink hợp lệ vẫn được giữ: `usr/bin/mc-rel -> ../../bin/sh` (đi lên 2
+cấp rồi xuống, vẫn trong rootfs) — chỉ symlink vượt gốc mới bị chặn.
+
+### Tag `v1.4.0`
+
+```
+git tag -a v1.4.0 -m "…"      # trên commit d616d48 (docs consolidation)
+git push origin v1.4.0        # CI: 4 arch musl + release job
+```
+
+Trạng thái CI/release của tag này: xem tab Actions; asset aarch64 **chưa** chạy lại `test.sh` trên box
+(việc của Track C khi box online).
+
+### Việc chưa làm được trong phiên này
+
+- `test.sh` full suite (84 case) trên box — box offline.
+- Soak 24 h — cần box.
+- Verify 4 asset musl trên phần cứng thật — cần box/qemu.

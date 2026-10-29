@@ -1,5 +1,34 @@
 # CHANGELOG — minicontainer
 
+## [1.5.0] - 2026-10-30
+
+### Added
+- **`sdk init` / `sdk pack`** (`build/src/sdk.c`, tên cũ trong tài liệu là `mc-sdk`): `init` sinh
+  skeleton `<dir>/{rootfs/, mc.conf, README.md}` và từ chối thư mục đã có nội dung; `pack` validate
+  cây rootfs bằng `nftw(FTW_PHYS)` (symlink tương đối chỉ bị từ chối khi đi ra ngoài gốc rootfs, kiểm
+  tra lexically — symlink tuyệt đối `/bin/busybox` vẫn hợp lệ), rồi gọi `tar()` với argv literal
+  (`--numeric-owner --owner=0 --group=0`) và ghi `<out>.sha256` dạng `sha256sum` để dùng ngay với
+  `pull --sha256=$(cut -d' ' -f1 file.sha256)`. Member luôn tương đối nên `check_tar()` của `pull`
+  chấp nhận; bit `+x` được giữ; `pack` cảnh báo nếu rootfs thiếu `/bin/sh` và nếu tên output không
+  kết thúc bằng `-rootfs.tar.gz` (khi đó `pull` không tìm thấy file).
+- 10 case `sdk` trong `build/test.sh` (init, mặc định `mc.conf`, chống ghi đè, tar member tương đối,
+  giữ `+x`, sha256 khớp, symlink vượt root bị từ chối, round-trip `pack → pull → run`).
+- `LICENSE` — MIT.
+
+### Changed
+- `run_wait()` / `run_capture()` chuyển từ `static` trong `pull.c` sang `common.c` để `sdk.c` dùng
+  chung (một implementation duy nhất cho "chạy lệnh bằng argv literal").
+- `test.sh` in tổng số case ở dòng cuối (`PASS=… FAIL=… TONG=…`) để tài liệu không lệch số.
+- `release.sh` đóng gói kèm `LICENSE`.
+- VERSION 1.4.0 → **1.5.0** (`minicontainer 1.5.0 (aarch64, musl, static)`, 144.904 B).
+
+### Verified
+- Build sạch `-O2 -Wall`, **0 warning**, cả 15 module trên toolchain Buildroot musl.
+- 9/9 check `sdk` chạy trên laptop (binary aarch64 qua binfmt, không cần root): init/pack/sha256/
+  tar member/`+x`/chống ghi đè/từ chối symlink — xem `progress/VERIFICATION_LOG.md`.
+- Round-trip `sdk pack → pull → giải nén` giữ đúng nội dung và quyền file.
+- Tag `v1.4.0` tạo ngày 2026-10-30 trên commit `d616d48` (CI dựng 4 asset musl).
+
 ## [1.4.0] - 2026-10-29
 
 ### Added

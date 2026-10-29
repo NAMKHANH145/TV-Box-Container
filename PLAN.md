@@ -303,7 +303,8 @@ Mục tiêu: biết rõ **cái gì cố tình không làm được** và **cái 
 | 1.1.0 | pids/io/NEWIPC, `/dev`+`--sys`, userns, seccomp, musl 57 KB, detach/state/stats, `test.sh` | 2026-10 |
 | 1.2.0 | OCI manifest, `service create` (systemd unit), health check, `--disk` watchdog | 2026-10 |
 | 1.3.0 | `exec`, `--net=bridge` + `netns_lo_up`, tự tạo `/dev`, 54→55 test, asset musl CI | 2026-10-29 |
-| 1.4.0 | `--read-only`, `pull`, 74/74 test, CI asset musl 100–125 KB | 2026-10-29 |
+| 1.4.0 | `--read-only`, `pull`, 74/74 test, CI asset musl 100–125 KB; **tag + release 2026-10-30** | 2026-10-29 |
+| 1.5.0 | `sdk init/pack` (đóng gói rootfs, validate symlink), `run_wait`/`run_capture` về `common.c`, 84 test, LICENSE MIT | 2026-10-30 |
 
 (Chi tiết theo từng phase: `progress/PHASE1.md` … `progress/PHASE16.md`; bằng chứng đo: `progress/VERIFICATION_LOG.md`.)
 
@@ -313,9 +314,11 @@ Mục tiêu: biết rõ **cái gì cố tình không làm được** và **cái 
 
 | # | Việc | Ghi chú |
 |---|---|---|
-| 1 | Tag `v1.4.0` và chạy release job | User quyết định thời điểm; CI đã xanh với `workflow_dispatch` |
-| 2 | Soak 24 h | `ITER=117000 bash build/soak.sh` (~1.36 vòng/s). Đã có 800 vòng/588 s, 0 lỗi 0 leak |
-| 3 | Verify asset musl trên phần cứng thật | Mới aarch64 build local (Buildroot toolchain) chạy `test.sh`; asset tải từ GitHub chưa chạy lại |
-| 4 | `mc-sdk` | Thư viện nhúng — xem §7.1 |
-| 5 | LICENSE | Chọn MIT hoặc Apache-2.0 |
-| 6 | Bridge NAT + port < 1024 | Cần `CAP_NET_BIND_SERVICE`/iptables — cân nhắc chi phí CPU |
+| 1 | Soak 24 h | `ITER=117000 bash build/soak.sh` (~1.36 vòng/s). Đã có 800 vòng/588 s, 0 lỗi 0 leak |
+| 2 | Tag `v1.5.0` + release | Sau soak; `bash build/release.sh` rồi `git tag v1.5.0` (shared state — hỏi trước) |
+| 3 | Verify asset musl trên phần cứng thật | Mới aarch64 build local; asset tải từ GitHub chưa chạy lại |
+| 4 | Self-hosted runner aarch64 | Chạy `test.sh` trước mỗi release |
+| 5 | Bridge NAT + port < 1024 | Cần `CAP_NET_BIND_SERVICE`/iptables — cân nhắc chi phí CPU |
+| 6 | `profiles/build.sh --clean` | Kiểm dung lượng trước khi build profile |
+
+Đã xong 2026-10-30: tag/release `v1.4.0`, `sdk init/pack` + 10 test, LICENSE MIT, `test.sh` in tổng case.
