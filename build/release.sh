@@ -1,43 +1,51 @@
 #!/bin/bash
-# R4-3: Create release tarball
+# R4-3: tao release tarball kem checksum.
+#   cach dung: ./release.sh   (hoac ARCH=riscv64 ./release.sh)
 set -e
-cd /home/namkhanh/TV-Box/build
+cd "$(dirname "$0")"
 
-VERSION="1.2.0"
-ARCH="aarch64"
+VERSION=$(sed -n 's/.*#define VERSION "\([^"]*\)".*/\1/p' src/main.c)
+[ -n "$VERSION" ] || { echo "khong doc duoc VERSION tu src/main.c"; exit 1; }
+ARCH="${ARCH:-$(uname -m)}"
+STAGE="release/minicontainer-${VERSION}-linux-${ARCH}"
 TARBALL="minicontainer-${VERSION}-linux-${ARCH}.tar.gz"
 
-echo "=== Building clean release ==="
+echo "=== Building clean release (v$VERSION, $ARCH) ==="
 make clean
 make
 echo "Build OK: $(ls -la minicontainer)"
 
 echo "=== Creating release directory ==="
 rm -rf release
-mkdir -p release/minicontainer-${VERSION}/rootfs
-mkdir -p release/minicontainer-${VERSION}/bin
+mkdir -p "$STAGE/rootfs" "$STAGE/profiles"
 
 echo "=== Copying artifacts ==="
-cp minicontainer release/minicontainer-${VERSION}/minicontainer
-cp test.sh release/minicontainer-${VERSION}/test.sh
-cp buildroot/output/images/rootfs.tar.gz release/minicontainer-${VERSION}/rootfs.tar.gz
-cp ../profiles/iot-gateway.defconfig release/minicontainer-${VERSION}/iot-gateway.defconfig 2>/dev/null || true
-cp ../README.md release/minicontainer-${VERSION}/README.md 2>/dev/null || true
-cp ../CHANGELOG.md release/minicontainer-${VERSION}/CHANGELOG.md 2>/dev/null || true
-cp ../GUIDE.md release/minicontainer-${VERSION}/GUIDE.md 2>/dev/null || true
-cp ../BAOCAO.md release/minicontainer-${VERSION}/BAOCAO.md 2>/dev/null || true
+cp minicontainer test.sh bench.sh "$STAGE/"
+for d in ../profiles/*.defconfig; do cp "$d" "$STAGE/profiles/"; done
+cp ../profiles/README.md "$STAGE/profiles/"
+for f in ../README.md ../CHANGELOG.md ../GUIDE.md ../BAOCAO.md; do
+  cp "$f" "$STAGE/" 2>/dev/null || true
+done
+
+# rootfs: lay image Buildroot gan nhat (neu da don thi lay tarball da luu)
+if [ -f buildroot/output/images/rootfs.tar.gz ]; then
+  cp buildroot/output/images/rootfs.tar.gz "$STAGE/rootfs/rootfs-base.tar.gz"
+elif [ -f rootfs-images/web-proxy-rootfs.tar.gz ]; then
+  cp rootfs-images/*.tar.gz "$STAGE/rootfs/"
+else
+  echo "CHU Y: khong co rootfs image — dung profiles/build.sh <profile> de build"
+fi
 
 echo "=== Verification ==="
-echo "Binary: $(ls -la release/minicontainer-${VERSION}/minicontainer)"
-echo "Rootfs: $(ls -la release/minicontainer-${VERSION}/rootfs.tar.gz)"
-echo "Test.sh: $(ls -la release/minicontainer-${VERSION}/test.sh)"
+du -sh "$STAGE"
+ls -la "$STAGE" "$STAGE/rootfs" "$STAGE/profiles"
+
+echo "=== Checksums (SHA256) ==="
+( cd "$STAGE" && sha256sum minicontainer test.sh rootfs/* profiles/*.defconfig 2>/dev/null | sort > SHA256SUMS.txt )
+cat "$STAGE/SHA256SUMS.txt"
 
 echo "=== Creating tarball ==="
 cd release
-tar czf ../${TARBALL} minicontainer-${VERSION}/
-ls -la ../${TARBALL}
-
-# Checksum
-echo "=== Checksum ==="
-sha256sum ../${TARBALL}
-echo "=== Release tarball created: ${TARBALL} ==="
+tar czf ../${TARBALL} minicontainer-${VERSION}-linux-${ARCH}/
+sha256sum ../${TARBALL} | tee ../${TARBALL}.sha256
+echo "=== Release tarball: ${TARBALL} ==="

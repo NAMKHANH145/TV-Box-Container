@@ -72,9 +72,16 @@ jobs:
           path: dist
           merge-multiple: true
 
+      - name: Checksums
+        run: |
+          cd dist
+          sha256sum minicontainer-linux-* test.sh > SHA256SUMS.txt
+          cat SHA256SUMS.txt
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
           files: |
             dist/minicontainer-linux-*
             dist/test.sh
+            dist/SHA256SUMS.txt

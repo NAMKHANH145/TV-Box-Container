@@ -30,6 +30,18 @@ echo "=== T1/T3 co lap ==="
 t "T1 pid=1 (buildroot)" $MC run --rootfs $BR /bin/sh -c '[ $$ -eq 1 ]'
 t "T1 pid=1 (alpine)" $MC run --rootfs $ALP /bin/sh -c '[ $$ -eq 1 ]'
 t "T3 hostname" $MC run --rootfs $BR /bin/sh -c '[ "$(hostname)" = minicontainer-os ]'
+echo "=== /dev trong container ==="
+t "dev: /dev/null la char device" $MC run --rootfs $BR /bin/sh -c '[ -c /dev/null ]'
+t "dev: ghi doc /dev/null" $MC run --rootfs $BR /bin/sh -c 'echo x >/dev/null && read r </dev/null; [ -z "$r" ]'
+t "dev: /dev/urandom doc duoc 4 byte" $MC run --rootfs $BR /bin/sh -c '[ "$(dd if=/dev/urandom bs=1 count=4 2>/dev/null | wc -c)" = 4 ]'
+nodev_check() {
+  rm -rf /tmp/nodev; mkdir -p /tmp/nodev
+  cp -a "$BR/." /tmp/nodev/ || { echo "khong copy duoc rootfs"; return 1; }
+  rm -rf /tmp/nodev/dev; mkdir -p /tmp/nodev/dev
+  $MC run --rootfs /tmp/nodev /bin/sh -c '[ -c /dev/null ]'
+  rc=$?; rm -rf /tmp/nodev; return $rc
+}
+t "dev: rootfs khong co /dev van chay" nodev_check
 echo "=== T2 jail (dung /tmp 1777 vi userns-nobody khong viet duoc /etc root) ==="
 $MC run --rootfs $BR /bin/sh -c 'touch /tmp/hack.txt' 2>/dev/null
 t "T2 vet chi trong rootfs" test -e $BR/tmp/hack.txt
@@ -193,7 +205,39 @@ fi
 $MC stop healthok >/dev/null 2>&1; $MC rm healthok >/dev/null 2>&1
 echo "=== validate input ==="
 t "--ram=abc bi tu choi" sh -c "! $MC run --ram=abc --rootfs $BR /bin/true >/dev/null 2>&1"
-t "--net=bridge bao loi ro" sh -c "$MC run --net=bridge --rootfs $BR /bin/true 2>&1 | grep -q 'chua ho tro'"
+t "--net=routable bi tu choi" sh -c "! $MC run --net=routable --rootfs $BR /bin/true >/dev/null 2>&1"
+echo "=== exec vao container dang chay ==="
+E=t$$e
+$MC run -d --name $E --rootfs $BR /bin/sh -c 'sleep 60' >/dev/null 2>&1
+t "exec: uid 0 trong container" $MC exec $E /bin/sh -c 'test "$(id -u)" -eq 0'
+t "exec: khong phai PID 1 (chung PID ns)" $MC exec $E /bin/sh -c 'test "$$" -ne 1'
+t "exec: seccomp van c (chan mount)" $MC exec $E /bin/sh -c '! mount -t proc proc /tmp 2>/dev/null'
+CG_SELF=$($MC exec $E cat /proc/self/cgroup 2>/dev/null)
+CG_INIT=$($MC exec $E cat /proc/1/cgroup 2>/dev/null)
+t "exec: cung cgroup voi container" test -n "$CG_SELF" -a "$CG_SELF" = "$CG_INIT"
+t "exec: id khong ton tai bi tu choi" sh -c "! $MC exec khongco$$ /bin/true >/dev/null 2>&1"
+$MC stop $E >/dev/null 2>&1; $MC rm $E >/dev/null 2>&1
+echo "=== net=bridge ==="
+B1=tb1$$; B2=tb2$$
+$MC run -d --name $B1 --net=bridge --rootfs $BR /bin/sh -c 'sleep 60' >/tmp/br1.out 2>/tmp/br1.log
+BRC=$?
+if [ $BRC -ne 0 ]; then
+  t "bridge: that bai thi bao loi ro" grep -q 'bridge that bai' /tmp/br1.log
+  echo "SKIP: bridge ping tests (kernel/thieu iproute2)"
+else
+  $MC run -d --name $B2 --net=bridge --rootfs $BR /bin/sh -c 'sleep 60' >/dev/null 2>&1
+  IP1=$(cat /run/minicontainer/$B1/ip 2>/dev/null)
+  IP2=$(cat /run/minicontainer/$B2/ip 2>/dev/null)
+  t "bridge: ghi state/ip trong dai 10.88" sh -c "case '$IP1' in 10.88.*) case '$IP2' in 10.88.*) exit 0;; esac;; esac; exit 1"
+  t "bridge: host ping duoc container" ping -c2 -W2 "$IP1"
+  t "bridge: trong container co eth0 + route mac dinh" $MC exec $B1 /bin/sh -c 'grep -q "^eth0" /proc/net/route'
+  t "bridge: 2 container ping nhau" $MC exec $B1 /bin/sh -c "ping -c2 -W2 $IP2"
+  t "bridge: khong ton tai file IP cung dai" test "$IP1" != "$IP2"
+  $MC stop $B1 >/dev/null 2>&1; $MC rm $B1 >/dev/null 2>&1
+  $MC stop $B2 >/dev/null 2>&1; $MC rm $B2 >/dev/null 2>&1
+  sleep 1
+  t "bridge: veth tu don khi container chet" sh -c '! ip link show type veth 2>/dev/null | grep -q mcv'
+fi
 echo "=== CLI: detach/ps/stop/rm ==="
 N=t$$
 ID=$($MC run -d --name $N --rootfs $BR /bin/sleep 60)
