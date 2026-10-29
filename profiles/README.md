@@ -87,7 +87,9 @@ ssh root@$BOX 'ls /opt/rootfs-'$P'/bin/busybox && minicontainer run --rootfs /op
 - Lưu ý disk: mỗi profile động cần ~7.5 GB output. Sau khi build xong chỉ giữ
   `images/rootfs.tar.gz` (đã lưu ở `build/rootfs-images/`, gitignore) rồi xoá
   `build/rootfs-<profile>/` — build lại được từ defconfig.
-- Chạy thật trên box: `web-proxy` (lighttpd 1.4.85, HTTP 200 qua `--net=bridge`) và
-  `python-edge` (Python 3.14.8, `import serial, spidev`) — xem `VERIFICATION_LOG.md`.
-  Server chỉ bind được port >= 1024 (mapped root không có `CAP_NET_BIND_SERVICE`).
-- Việc còn lại: xác nhận `iot-gateway` chạy mosquitto publish/subscribe trên box.
+- Chạy thật trên box: `web-proxy` (lighttpd 1.4.85, HTTP 200 qua `--net=bridge`),
+  `python-edge` (Python 3.14.8, `import serial, spidev`) và `iot-gateway`
+  (Mosquitto 2.1.2: 1 broker + 1 publisher + 1 subscriber ở 3 container khác nhau,
+  tin đi qua `mcbr0`; `curl`/`sqlite3` cũng có sẵn). Xem `VERIFICATION_LOG.md`.
+  Server chỉ bind được port >= 1024 (mapped root không có `CAP_NET_BIND_SERVICE`),
+  và `lo` được runtime bật tự động nên 127.0.0.1 dùng được trong container.

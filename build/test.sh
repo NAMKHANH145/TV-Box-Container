@@ -59,6 +59,7 @@ $MC run --pids 16 --rootfs $BR /bin/sh -c 'for i in $(seq 1 50); do /bin/sleep 5
 if grep -q "can't fork" /tmp/pids.log; then echo "PASS: pids chan spawn (kernel tu choi fork)"; PASS=$((PASS+1));
 else echo "FAIL: pids khong siet"; FAIL=$((FAIL+1)); fi
 t "net isolated chi con lo" $MC run --net=isolated --rootfs $BR /bin/sh -c '[ "$(ls /sys/class/net 2>/dev/null)" = "" ] || ip link 2>/dev/null | grep -q "1: lo"'
+t "net moi: lo da UP (127.0.0.1 co trong fib_trie)" $MC run --net=isolated --rootfs $BR /bin/sh -c 'grep -q 127.0.0.1 /proc/net/fib_trie'
 t "seccomp: chan mount" $MC run --rootfs $BR /bin/sh -c '! mount -t proc proc /tmp/m 2>/dev/null'
 $MC run --rootfs $BR /breakout >/dev/null 2>&1
 if [ $? -ne 0 ]; then echo "PASS: breakout bi chan"; PASS=$((PASS+1));

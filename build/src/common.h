@@ -114,3 +114,4 @@ void container_watchdog_detached(long limit, const char *rootfs, const char *cgd
 int bridge_setup(pid_t child, struct bridge_cfg *bc);
 void bridge_teardown(pid_t child);
 int bridge_configure(const struct bridge_cfg *bc);
+int netns_lo_up(void);

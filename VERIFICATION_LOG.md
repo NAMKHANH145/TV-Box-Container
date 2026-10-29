@@ -220,5 +220,24 @@ aarch64. armv7l/x86_64 moi chung minh binary nap va parse lenh dung; riscv64 moi
 build. Chua co ket nao chay container da kien truc tren QEMU system (can root
 trong image cua chinh kien truc do).
 
-Remaining: 24h soak (T3) — chạy `HOUR=24 bash soak.sh`; MQTT publish/subscribe
-của `iot-gateway`; xác nhận release job theo tag; riscv64 chưa chạy thử.
+### MQTT end-to-end tren `iot-gateway` (box, bridge)
+
+`lo` cua netns moi mac dinh DOWN nen moi thu bind/connect 127.0.0.1 fail;
+`netns_lo_up()` (bridge.c, goi tu ns.c cho isolated+bridge) da khac phuc.
+
+| Buoc | Ket qua |
+|---|---|
+| `mosquitto -c /etc/mosquitto/mc.conf` trong container (`--ram=32M --cpu=20 --net=bridge`) | RUNNING, 1 pid, RSS 2.5 MB |
+| Ngu dev `user root` trong config | can thiet — mac dinh `user mosquitto` + `setgroups` tra EPERM trong userns |
+| `mosquitto_pub -h 127.0.0.1` qua `exec` vao container broker | rc=0 (lo da UP) |
+| Publisher container 2 (bridge) -> broker -> Subscriber container 3 | `sub_out=[tu-m2-qua-bridge]` |
+| `python-edge` `socket.create_connection((brokerIP,1883))` | `TCP connect OK` |
+| Loopback thật trong `--net=isolated` (python bind+accept+send/recv 127.0.0.1) | `server accepted from ('127.0.0.1', ...)` / `client got b'ping'` |
+| Sau `stop`/`rm` 3 container | 0 cgroup, 0 veth, 0 state dir, 0 mount |
+
+Test gate: `test.sh` chay lien tiep 3 lan — 54/54, 54/54, 54/54 (lan 4 co
+them case `lo` -> 55). Mot lan FAIL "health detached: cgroup da don" la do
+ chinh toi van chay container thu cong song song voi luc do, khong phai regression.
+
+Remaining: 24h soak (T3) — chạy `HOUR=24 bash soak.sh`; xác nhận release job
+theo tag; riscv64 chưa chạy thử.

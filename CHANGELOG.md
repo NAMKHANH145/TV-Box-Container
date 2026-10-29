@@ -20,6 +20,10 @@
   explicit error instead of a silent host fallback.
 - `build/soak.sh` — repeated-run leak check (cgroups, mounts, `/run` state,
   MemAvailable delta), optional `ITER=`/`HOUR=`.
+- **Loopback bring-up** (`netns_lo_up()` in `bridge.c`, called from `ns.c`): a
+  fresh netns starts with `lo` DOWN, so every `127.0.0.1` connect inside a
+  container failed (mosquitto clients, local health checks). `isolated` and
+  `bridge` containers now have `lo` UP with the 127.0.0.0/8 route.
 - **Container `/dev`** (`ns.c: dev_setup()`): a Buildroot rootfs only has device
   nodes when it was built as root, so the dynamic profiles shipped an empty
   `/dev` and every detached run died on `open /dev/null`. The child now mounts a
@@ -54,10 +58,16 @@
   route, container↔container ping, unique addresses, veth auto-cleanup; 4 new
   `/dev` cases incl. a rootfs with an empty `/dev`).
   `--net=host`/`isolated`, detach lifecycle and cgroup cleanup unaffected.
-- Profiles on hardware: `web-proxy` 3 MB (lighttpd 1.4.85) and `python-edge`
-  24 MB (Python 3.14.8, `import serial, spidev` OK) run as real containers;
-  a `web-proxy` server on `--net=bridge` answered `GET /` → HTTP 200 for a
-  `python-edge` client container (528 KB RSS, 1 pid).
+- Profiles on hardware: `web-proxy` 3 MB (lighttpd 1.4.85), `python-edge`
+  24 MB (Python 3.14.8, `import serial, spidev` OK) and `iot-gateway` 15 MB
+  (Mosquitto 2.1.2 + curl + sqlite3) run as real containers. A Mosquitto
+  broker container on `--net=bridge` (`--ram=32M --cpu=20`, 2.5 MB RSS) received
+  a publish from a second container and delivered it to a third one
+  (`mosquitto_sub` output `tu-m2-qua-bridge`); `mosquitto_pub -h 127.0.0.1`
+  works via `exec` now that `lo` is up. A `web-proxy` server answered
+  `GET /` → HTTP 200 for a `python-edge` client container (528 KB RSS, 1 pid).
+- Release gate: `test.sh` run 3 times back-to-back on the box → 54/54 each time
+  (plus the `/dev` case → 55/55), no leftover cgroups, veth, state dirs or mounts.
 - Soak smoke: `ITER=200` → 200 cycles in 146 s, 0 errors, 0 leak reports,
   MemAvailable +3 MB drift (no regression).
 

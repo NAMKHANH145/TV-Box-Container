@@ -147,3 +147,13 @@ int bridge_configure(const struct bridge_cfg *bc) {
 	close(fd);
 	return rc;
 }
+
+/* Netns moi sinh ra voi lo ở trang thai DOWN: moi thu connect 127.0.0.1
+ * (health check, client cung container) that bai. Bat lo len. */
+int netns_lo_up(void) {
+	int fd = socket(AF_INET, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	if (fd < 0) return -1;
+	int rc = set_updown(fd, "lo", 1);
+	close(fd);
+	return rc;
+}

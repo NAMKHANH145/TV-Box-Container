@@ -90,6 +90,10 @@ int child_fn(void *arg) {
 	}
 	close(a->go_rd);
 
+	/* Netns moi (isolated/bridge) sinh ra với lo DOWN: mọi thứ connect
+	 * 127.0.0.1 sẽ fail. Host thì dùng lo của host, không cần đụng tới. */
+	if (strcmp(c->net, "host") != 0) netns_lo_up();
+
 	if (setgid(0) < 0) die("setgid");
 	if (setuid(0) < 0) die("setuid");
 

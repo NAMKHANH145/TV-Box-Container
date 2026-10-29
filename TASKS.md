@@ -20,7 +20,7 @@ Tài liệu này trả lời 3 câu hỏi: **dự án có những module nào**,
 | `--net=bridge` | ✅ `mcbr0` + veth, 2 container ping nhau, test trong `test.sh` |
 | `/dev` trong container | ✅ tmpfs + bind node (rootfs động không có `/dev/null`) |
 | Health check chế độ `-d` | ✅ Watchdog dùng chung với `--disk`, marker `health_failed` |
-| Rootfs profiles (4 bản) | ✅ `base-mini`, `web-proxy` (3 MB), `python-edge` (24 MB) đã chạy thật; `iot-gateway` đang build |
+| Rootfs profiles (4 bản) | ✅ Cả 4 build + chạy thật trên box: base-mini 1.3 MB, web-proxy 2.6 MB, iot-gateway 14.1 MB, python-edge 22.2 MB |
 | CI GitHub Actions | ✅ 4/4 arch xanh (run `40842042612`); release theo tag + SHA256SUMS vừa thêm, **chưa chạy thật** |
 | Soak test 24h | 🟡 Smoke 200 vòng/146s: 0 lỗi, 0 leak. Chưa chạy 24h |
 
@@ -81,7 +81,7 @@ Mỗi track có 1 owner chính. Cột "Owner" đang để trống — điền t�
 
 | ID | Việc | Ưu tiên | Ước lượng | Phụ thuộc | Điều kiện xong |
 |---|---|---|---|---|---|
-| **B1 / R5-2** | Build thật 3 profile còn lại. 🟡 `web-proxy` ✅ 3 MB (lighttpd 1.4.85), `python-edge` ✅ 24 MB (Python 3.14.8 + pyserial + spidev) — cả hai đã chạy container thật trên box; `iot-gateway` đang build (đã sửa symbol legacy `BR2_PACKAGE_CURL` → `LIBCURL`) | P0 | 2–4 buổi (máy yếu lâu hơn) | `profiles/*.defconfig` đã validate | `rootfs.tar.gz` chạy được `minicontainer run`; đo kích thước/RAM thực tế, ghi vào `profiles/README.md` |
+| **B1 / R5-2** | ~~Build thật 3 profile còn lại~~ ✅ **DONE 2026-10-29**: `web-proxy` 3 MB (lighttpd 1.4.85), `python-edge` 24 MB (Python 3.14.8 + pyserial/spidev), `iot-gateway` 15 MB (Mosquitto 2.1.2) — cả 3 chạy container thật trên box, broker pub/sub đi qua `mcbr0` giữa 3 container | P0 | 2–4 buổi (máy yếu lâu hơn) | `profiles/*.defconfig` đã validate | `rootfs.tar.gz` chạy được `minicontainer run`; đo kích thước/RAM thực tế, ghi vào `profiles/README.md` |
 | **B2 / R5-1** | CI GitHub Actions 4 arch đã xanh (run `40842042612`); còn: cache toolchain + thử release theo tag `v1.3.0` | P0 | 0.5 buổi | Repo đã push | 4 artifact build xanh (**xong**); tag `v*` tạo release có checksum (B3) |
 | **B3 / R4-3** | ~~Đóng gói release tarball~~ ✅ **DONE 2026-10-29**: `release.sh` đọc version từ `src/main.c`, đóng binary + test/soak/bench + profiles + rootfs + `SHA256SUMS.txt`; CI cũng gắn `SHA256SUMS.txt` vào release theo tag (chưa chạy thật) | P1 | 0.5 buổi | B2 | `release.sh` chạy end-to-end; tarball cài trên box không lỗi |
 | **B4** | `profiles/build.sh`: thêm `--clean`, kiểm tra dung lượng đĩa trước build, log rõ (đã sửa đường dẫn toolchain + `chmod +x`) | P2 | 0.5 buổi | B1 | Build lại từ đầu bằng 1 lệnh; lỗi thiếu dung lượng báo trước khi build |
