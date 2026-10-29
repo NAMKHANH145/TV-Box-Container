@@ -3,12 +3,12 @@
 Mỗi profile là một defconfig Buildroot cho TV Box **Amlogic S905W (aarch64, Cortex-A53)**.
 Defconfig chỉ chứa gói tối thiểu; kết quả là `rootfs.tar.gz` giải nén thẳng vào `/opt/rootfs-<profile>` rồi chạy bằng `minicontainer`.
 
-| Profile | Nội dung | libc/link | Kích thước dự kiến | Dùng cho |
+| Profile | Nội dung | libc/link | Dung lượng (giải nén / tar.gz) | Dùng cho |
 |---|---|---|---|---|
-| `base-mini` | BusyBox (sh, ls, ps, dd…) | musl **static** | ~1.3 MB | shell script, cron, sandbox |
-| `web-proxy` | BusyBox + lighttpd | musl dynamic | ~4 MB | admin UI, proxy tĩnh |
-| `iot-gateway` | BusyBox + Mosquitto broker/clients + OpenSSL + SQLite + cURL | musl dynamic | ~8 MB | MQTT gateway, thu thập dữ liệu |
-| `python-edge` | BusyBox + Python 3 + pyserial + spidev | musl dynamic | ~15 MB | đọc cảm biến UART/SPI |
+| `base-mini` | BusyBox (sh, ls, ps, dd…) | musl **static** | ~1.3 MB / 0.6 MB | shell script, cron, sandbox |
+| `web-proxy` | BusyBox + lighttpd | musl dynamic | 2.6 MB / 1.4 MB | admin UI, proxy tĩnh |
+| `iot-gateway` | BusyBox + Mosquitto broker/clients + OpenSSL + SQLite + cURL | musl dynamic | 14.1 MB / 6.9 MB | MQTT gateway, thu thập dữ liệu |
+| `python-edge` | BusyBox + Python 3 + pyserial + spidev | musl dynamic | 22.2 MB / 9.7 MB | đọc cảm biến UART/SPI |
 
 > **Vì sao có static và dynamic?** `python3`, `lighttpd`, `mosquitto` trong Buildroot đều
 > `depends on !BR2_STATIC_LIBS`, nên 3 profile này buộc phải dynamic. Chỉ `base-mini`
@@ -77,8 +77,17 @@ ssh root@$BOX 'ls /opt/rootfs-'$P'/bin/busybox && minicontainer run --rootfs /op
 
 ## Đã kiểm tra
 
-- 2026-10-29: cả 4 defconfig parse thành công với Buildroot `2026.11-git`, các symbol
-  `MOSQUITTO(_BROKER/_CLIENTS)`, `OPENSSL`, `SQLITE`, `CURL`, `PYTHON3`, `PYTHON_SERIAL`,
-  `PYTHON_SPIDEV`, `LIGHTTPD`, `STATIC_LIBS` đều giữ nguyên trong `.config`.
-- `base-mini` đã build và chạy trên box (rootfs ~1.3 MB, 39/39 test PASS với rootfs này).
-- 3 profile dynamic: defconfig hợp lệ, **chưa build thật** — đây là việc B1 trong `TASKS.md`.
+- 2026-10-29: cả 4 defconfig parse thành công với Buildroot `2026.11-git`. Các symbol
+  `MOSQUITTO(_BROKER/_CLIENTS)`, `OPENSSL`, `SQLITE`, `LIBCURL(_CURL)`, `PYTHON3`,
+  `PYTHON_SERIAL`, `PYTHON_SPIDEV`, `LIGHTTPD`, `STATIC_LIBS` đều giữ nguyên trong `.config`.
+- `base-mini` đã build và chạy trên box (rootfs ~1.3 MB, toàn bộ `test.sh` PASS với rootfs này).
+- `web-proxy` đã build: 2.6 MB giải nén (tar.gz 1.4 MB).
+- `python-edge` đã build: 22.2 MB giải nén (tar.gz 9.7 MB).
+- `iot-gateway` đã build: 14.1 MB giải nén (tar.gz 6.9 MB).
+- Lưu ý disk: mỗi profile động cần ~7.5 GB output. Sau khi build xong chỉ giữ
+  `images/rootfs.tar.gz` (đã lưu ở `build/rootfs-images/`, gitignore) rồi xoá
+  `build/rootfs-<profile>/` — build lại được từ defconfig.
+- Chạy thật trên box: `web-proxy` (lighttpd 1.4.85, HTTP 200 qua `--net=bridge`) và
+  `python-edge` (Python 3.14.8, `import serial, spidev`) — xem `VERIFICATION_LOG.md`.
+  Server chỉ bind được port >= 1024 (mapped root không có `CAP_NET_BIND_SERVICE`).
+- Việc còn lại: xác nhận `iot-gateway` chạy mosquitto publish/subscribe trên box.

@@ -6,7 +6,7 @@
 
 | Khía cạnh | minicontainer | Docker |
 |-----------|--------------|--------|
-| Binary size | ~114KB static (v1.2.0) | dockerd ~131MB + containerd ~77MB |
+| Binary size | ~122KB static (v1.3.0) | dockerd ~131MB + containerd ~77MB |
 | RAM idle | 0MB (zero-daemon) | ~207MB |
 | Start latency | 51-68ms | 2.076s |
 | Rootfs size | 1.3MB (Buildroot) | 8.5MB+ (Alpine) |
@@ -36,17 +36,21 @@ make deploy BOX=<IP_BOX> SSHPASS=<password>
 
 ### Run tests
 ```bash
-bash test.sh  # on device, 39 test cases
+bash test.sh   # on device, 50 test cases
+ITER=200 bash soak.sh   # repeat-run leak check (default 100 iterations)
 ```
 
 ## Commands
 
 ```bash
 # Run container (foreground)
-minicontainer run --ram 30M --cpu 20 --pids 64 [--io 1M] [--disk 100M] [--net host|isolated] [--rootfs DIR] [--hostname NAME] [--health-cmd CMD] <cmd> [args...]
+minicontainer run --ram 30M --cpu 20 --pids 64 [--io 1M] [--disk 100M] [--net host|isolated|bridge] [--rootfs DIR] [--hostname NAME] [--health-cmd CMD] <cmd> [args...]
 
 # Run detached
 minicontainer run -d --name ID --ram 30M --cpu 20 /bin/sleep 60
+
+# Run a second process inside an existing container (setns, not a new container)
+minicontainer exec <id> /bin/sh -c 'id -u'
 
 # List containers
 minicontainer ps
@@ -83,16 +87,54 @@ extra process**; with `-d` it forks one small watchdog per container that
 exits when the container does. `RLIMIT_FSIZE = SIZE` still caps any single
 file immediately. Worst-case burst is roughly one sampling interval.
 
+### Exec (`exec <id> <cmd>`)
+
+`exec` enters the running container with `setns()` instead of cloning new
+namespaces: it joins user → net/uts/ipc → mount → pid, re-establishes the
+target root through an `O_PATH` fd on `/proc/<pid>/root`, then `fork()`s
+(PID namespaces only affect children) and `execvp`s the command. Namespaces
+identical to the caller's are skipped — joining the *host* netns after
+entering the container's userns would fail with EPERM. The new process is
+attached to the container cgroup, runs under the same seccomp filter, sees
+PID 1 as the container init, and has uid 0 inside. No `nsenter`/iproute2
+dependency.
+
+### Networking (`--net`)
+
+| Mode | Effect |
+|------|--------|
+| `host` (default) | no `CLONE_NEWNET`; shares host connectivity |
+| `isolated` | new empty netns, only `lo` down — no external reach |
+| `bridge` | new netns with `eth0` on the shared `mcbr0` bridge (10.88.0.1/16) |
+
+`bridge` creates a veth pair named `mcv<pid>`/`mcc<pid>`, moves the container
+end into the netns, and configures it there with ioctls only (so the rootfs
+needs no `ip`); the host end is created and bridged with `ip` from iproute2.
+The address is derived from the host PID (`10.88.<pid/256>.<pid%256>`,
+skipping reserved values) and recorded in `/run/minicontainer/<id>/ip`.
+There is no NAT, so bridge containers reach the LAN only if the host routes
+the 10.88/16 subnet; they talk to each other and to 10.88.0.1 directly. The
+host veth disappears with the container netns. If `ip` is missing or the
+kernel lacks `veth`/`bridge`, the run fails with an explicit error rather
+than silently falling back.
+
+### Exec / health interplay
+
+`--health-cmd` runs on the host, so a check that needs to be inside the
+container should use `exec` from a wrapper service instead.
+
 ## Architecture
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
 │  Host (TV Box: Amlogic S905W, 1.8GB RAM, eMMC)          │
 │  ┌───────────────────────────────────────────────────────┐ │
-│  │  minicontainer (114KB, 0 daemon, zero memory overhead) │ │
+│  │  minicontainer (122KB, 0 daemon, zero memory overhead) │ │
 │  │  ┌─────────────────────────────────────────────────┐ │ │
 │  │  │  run.c: clone() + chroot + seccomp + cgroup     │ │ │
 │  │  │  ns.c: CLONE_NEWPID/NEWNS/NEWUTS/NEWIPC/NEWUSER │ │ │
+│  │  │  exec.c: setns() vao container dang chay       │ │ │
+│  │  │  bridge.c: mcbr0 + veth, ioctls trong netns     │ │ │
 │  │  │  cgroup.c: memory/cpu/pids/io v2                 │ │ │
 │  │  │  disk.c: userspace disk quota watchdog (R2-1)    │ │ │
 │  │  │  state.c: ps/stats/stop/rm (via /run filesystem) │ │ │
@@ -130,13 +172,18 @@ file immediately. Worst-case burst is roughly one sampling interval.
 ```
 build/
 ├── Makefile          # make, make tools, make deploy, make clean
-├── test.sh           # 39 test cases
-├── src/              # 11 C modules (common, ns, cgroup, run, state, cli, oci, seccomp, disk, systemd, main)
+├── test.sh           # 50 test cases
+├── soak.sh           # leak/memory check over repeated runs
+├── bench.sh          # latency & resource benchmark
+├── release.sh        # staged tarball + SHA256SUMS (version read from src/main.c)
+├── src/              # 13 C modules + common.h
+│                     # (main, cli, common, ns, run, exec, bridge, cgroup,
+│                     #  disk, seccomp, state, oci, systemd)
 ├── buildroot/        # Buildroot source for building rootfs (gitignored)
 ├── oci-test/         # Sample OCI bundle
 └── tvbox_defconfig   # Buildroot defconfig for rootfs
 profiles/             # 4 rootfs profiles + build.sh + README
-.github/workflows/    # multi-arch CI (4 architectures)
+.github/workflows/    # multi-arch CI (4 architectures) + tagged release
 ```
 
 ## Build Requirements
@@ -154,9 +201,13 @@ profiles/             # 4 rootfs profiles + build.sh + README
   `health_failed` marker in detached mode
 - `--disk` is a sampling watchdog (1s), not a kernel quota: a fast burst can
   overshoot by ~1s of writes; a single file is still hard-capped by RLIMIT_FSIZE
-- `--net=bridge` not implemented; the flag is rejected instead of silently
-  falling back to host networking
-- No `exec` into running container (use `nsenter`)
+- Ports < 1024 cannot be bound inside a container (mapped root has no
+  `CAP_NET_BIND_SERVICE` in the init userns) — run servers on 8080+
+- `--net=bridge` has no NAT/DNS: bridge containers reach only the bridge
+  subnet (10.88.0.0/16) and 10.88.0.1 unless the host routes/forwards it
+- `exec` needs the container's PID still alive and read access to
+  `/proc/<pid>/ns/*`; it does not copy env or working directory from the
+  caller
 - Multi-arch binaries are built from portable seccomp (`__NR_*`) but CI has not
   been exercised on armv7l/riscv64 hardware
 

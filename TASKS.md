@@ -1,6 +1,6 @@
 # TASKS — Chia việc nhóm minicontainer
 
-> Cập nhật: 2026-10-29 · Phiên bản hiện tại: **v1.2.0** · Test trên box: **39/39 PASS**
+> Cập nhật: 2026-10-29 · Phiên bản hiện tại: **v1.3.0** · Test trên box: **54/54 PASS**
 > Repo: <https://github.com/NAMKHANH145/TV-Box-Container>
 > Tài liệu nền: `README.md` (cách dùng), `PLAN-4.md` (lộ trình R1–R5), `VERIFICATION_LOG.md` (bằng chứng đo trên S905W).
 
@@ -13,46 +13,50 @@ Tài liệu này trả lời 3 câu hỏi: **dự án có những module nào**,
 | Hạng mục | Trạng thái |
 |---|---|
 | Runtime (namespace, cgroup, seccomp, disk quota) | ✅ Chạy thật trên TV Box S905W |
-| 39 test case (`build/test.sh`) | ✅ 39/39 PASS (2026-10-29) |
+| 54 test case (`build/test.sh`) | ✅ **54/54 PASS** (2026-10-29, v1.3.0) — thêm exec, bridge, /dev |
 | Disk quota userspace `--disk` | ✅ Foreground + detached + RLIMIT_FSIZE |
 | OCI bundle (subset) | ✅ `oci-run`, có cảnh báo key ngoài subset |
-| CLI (`run/ps/stats/stop/rm/exec?`) | ✅ Trừ `exec` (chưa có) |
-| `--net=bridge` | ❌ Chưa làm (hiện chỉ `host` / `isolated`) |
+| CLI (`run/ps/stats/stop/rm/exec`) | ✅ Đủ, `exec` dùng `setns` (`src/exec.c`) |
+| `--net=bridge` | ✅ `mcbr0` + veth, 2 container ping nhau, test trong `test.sh` |
+| `/dev` trong container | ✅ tmpfs + bind node (rootfs động không có `/dev/null`) |
 | Health check chế độ `-d` | ✅ Watchdog dùng chung với `--disk`, marker `health_failed` |
-| Rootfs profiles (4 bản) | ✅ Defconfig đã validate với Buildroot; mới build base-mini trên phần cứng |
-| CI GitHub Actions | ✅ 4/4 arch xanh (run `40842042612`); release theo tag chưa test |
-| Soak test 24h | ❌ Chưa làm |
+| Rootfs profiles (4 bản) | ✅ `base-mini`, `web-proxy` (3 MB), `python-edge` (24 MB) đã chạy thật; `iot-gateway` đang build |
+| CI GitHub Actions | ✅ 4/4 arch xanh (run `40842042612`); release theo tag + SHA256SUMS vừa thêm, **chưa chạy thật** |
+| Soak test 24h | 🟡 Smoke 200 vòng/146s: 0 lỗi, 0 leak. Chưa chạy 24h |
 
 **Nguyên tắc:** mọi task phải có (1) code, (2) test trong `build/test.sh` hoặc test riêng, (3) cập nhật `README/CHANGELOG` nếu thay đổi hành vi. Không nhận task nào chỉ "chạy được trên laptop".
 
 ---
 
-## 2. "10 module là tất cả rồi à?" — Có 11 module
+## 2. "10 module là tất cả rồi à?" — Có 13 module
 
-Đúng là ít, vì đây là runtime tối giản chứ không phải Docker. Mỗi module một việc, tổng ~1.385 dòng C:
+Đúng là ít, vì đây là runtime tối giản chứ không phải Docker. Mỗi module một việc, tổng ~1.779 dòng C:
 
 | # | File | Dòng | Nhiệm vụ | Độ khó đọc |
 |---|---|---:|---|---|
-| 1 | `src/main.c` | 85 | `main()`, dispatch command, `--version`, in arch/libc | Dễ |
+| 1 | `src/main.c` | 91 | `main()`, dispatch command (`run/ps/stats/stop/rm/exec/oci-run/service`), `--version` | Dễ |
 | 2 | `src/cli.c` | 46 | Parse argv → `struct config`, validate số (`--ram`, `--cpu`…) | Dễ |
-| 3 | `src/common.c/.h` | 98 + 102 | Helper dùng chung: log, `die_msg`, `parse_bytes`, validate tên/đường dẫn | Dễ |
-| 4 | `src/ns.c` | 61 | `clone()` 6 namespace, map userns (root trong → nobody ngoài), chroot | **Khó** |
-| 5 | `src/run.c` | 222 | Vòng đời container: setup cgroup → clone → supervisor → tín hiệu → health/disk | **Khó** |
-| 6 | `src/cgroup.c` | 104 | Ghi `memory.max`, `cpu.max`, `pids.max`, `io.max`; kill/cleanup cgroup v2 | Trung bình |
-| 7 | `src/disk.c` | 119 | Đo dung lượng rootfs (nftw), watchdog quota, marker `disk_exceeded` | Trung bình |
-| 8 | `src/seccomp.c` | 102 | BPF deny-list 21 syscall nguy hiểm, trả `EPERM` | **Khó** |
-| 9 | `src/oci.c` | 129 | Đọc `config.json` (subset OCI), cảnh báo key lạ | Trung bình |
-| 10 | `src/state.c` | 264 | `ps/stats/stop/rm`, state trong `/run/minicontainer/<id>/` | Trung bình |
-| 11 | `src/systemd.c` | 53 | Sinh unit systemd để tự restart container, vẫn zero-daemon | Dễ |
+| 3 | `src/common.c/.h` | 96 + 116 | Helper dùng chung: log, `die_msg`, `parse_bytes`, validate tên/đường dẫn, `struct bridge_cfg` | Dễ |
+| 4 | `src/ns.c` | 142 | `clone()` 6 namespace, map userns, chroot, **tạo `/dev` (tmpfs + bind node)**, bridge trong netns | **Khó** |
+| 5 | `src/run.c` | 243 | Vòng đời container: setup cgroup → clone → bridge → supervisor → tín hiệu → health/disk | **Khó** |
+| 6 | `src/exec.c` | 124 | `exec <id>`: `setns` user→net/mnt→pid, `O_PATH` root, fork, seccomp, attach cgroup | **Khó** |
+| 7 | `src/bridge.c` | 149 | `mcbr0` + veth pair (`ip` ở host), đặt tên/IP/route bằng ioctl trong netns | Trung bình |
+| 8 | `src/cgroup.c` | 104 | Ghi `memory.max`, `cpu.max`, `pids.max`, `io.max`; kill/cleanup cgroup v2 | Trung bình |
+| 9 | `src/disk.c` | 119 | Đo dung lượng rootfs (nftw), watchdog quota/health, marker | Trung bình |
+| 10 | `src/seccomp.c` | 102 | BPF deny-list 21 syscall nguy hiểm, trả `EPERM` | **Khó** |
+| 11 | `src/oci.c` | 129 | Đọc `config.json` (subset OCI), cảnh báo key lạ | Trung bình |
+| 12 | `src/state.c` | 265 | `ps/stats/stop/rm`, state trong `/run/minicontainer/<id>/` (kèm `ip`) | Trung bình |
+| 13 | `src/systemd.c` | 53 | Sinh unit systemd để tự restart container, vẫn zero-daemon | Dễ |
 
-Thứ tự đọc đề xuất cho người mới: **main → cli → common → state → run → cgroup → ns → seccomp → disk → oci → systemd**. Đọc `run.c` cuối cùng vì nó gọi gần như mọi thứ.
+Thứ tự đọc đề xuất cho người mới: **main → cli → common → state → run → cgroup → ns → bridge → exec → seccomp → disk → oci → systemd**. Đọc `run.c` sớm vì nó gọi gần như mọi thứ; đọc `ns.c`/`exec.c` sau cùng vì hai file này chứa các ràng buộc khó nhất (userns, setns, mount).
 
 ### Cấu trúc ngoài `src/`
 
 ```
-build/            Makefile, test.sh (39 case), bomb.c/breakout.c (test an ninh)
+build/            Makefile, test.sh (54 case), soak.sh, bench.sh, release.sh,
+                  bomb.c/breakout.c (test an ninh)
 profiles/         4 defconfig Buildroot + build.sh
-.github/workflows/build.yml   CI 4 kiến trúc
+.github/workflows/build.yml   CI 4 kiến trúc + release kèm SHA256SUMS theo tag
 deploy/           script triển khai lên box
 docs gốc: README.md, CHANGELOG.md, PLAN-4.md, VERIFICATION_LOG.md, FINAL.md
 ```
@@ -68,25 +72,26 @@ Mỗi track có 1 owner chính. Cột "Owner" đang để trống — điền t�
 | ID | Việc | Ưu tiên | Ước lượng | Phụ thuộc | Điều kiện xong |
 |---|---|---|---|---|---|
 | **A1 / R5-3a** | ~~Health check cho chế độ `-d`~~ ✅ **DONE 2026-10-29**: mở rộng watchdog chạy `--health-cmd` mỗi 5s, marker `health_failed`, kill cgroup | P0 | 0.5–1 buổi | `src/disk.c`, `src/run.c` | Test `-d --health-cmd false` → STOPPED ≤15s, marker tồn tại, cgroup sạch; `true` không bị giết oan |
-| **A2 / R5-3b** | Lệnh `exec <id> <cmd>` qua `nsenter`/`setns` (PID, mnt, net) | P1 | 2–3 buổi | A1 | `exec` chạy được trong container đang chạy; ghi rõ giới hạn userns trong README |
-| **A3 / R5-3c** | `--net=bridge`: tạo veth pair + `br0` bằng netlink hoặc `ip` (không thêm daemon) | P2 | 3–5 buổi | Kernel box có `veth`, `bridge` | 2 container ping nhau qua bridge; test trong `test.sh`; fallback báo lỗi rõ nếu kernel thiếu module |
-| **A4** | Rà lại seccomp cho arch mới, thêm syscall vào deny-list có test | P2 | 1 buổi | — | `breakout` fail trên cả 4 arch; không ảnh hưởng 39 test cũ |
+| **A2 / R5-3b** | ~~Lệnh `exec <id> <cmd>`~~ ✅ **DONE 2026-10-29** (`src/exec.c`, `setns` thuần C, không dùng `nsenter`): vào user→net/mnt→pid, `O_PATH` `/proc/<pid>/root`, fork, seccomp, attach cgroup. 5 test trong `test.sh`. | P1 | 2–3 buổi | A1 | `exec` chạy được trong container đang chạy; ghi rõ giới hạn userns trong README |
+| **A3 / R5-3c** | ~~`--net=bridge`~~ ✅ **DONE 2026-10-29** (`src/bridge.c`): `mcbr0` 10.88.0.1/16 + veth `mcv<pid>`/`mcc<pid>`, host dùng `ip`, container tự đặt tên/IP/route bằng ioctl. 6 test trong `test.sh`, lighttpd↔python3 HTTP 200 qua bridge. | P2 | 3–5 buổi | Kernel box có `veth`, `bridge` | 2 container ping nhau qua bridge; test trong `test.sh`; fallback báo lỗi rõ nếu kernel thiếu module |
+| **A5** | `--net=bridge` + NAT/DNS để container ra ngoài LAN (chỉ khi có nhu cầu thật) | P3 | 1–2 buổi | A3 | `--net=bridge` có `--publish`/forwarding, test ping 8.8.8.8 từ container |
+| **A4** | Rà lại seccomp cho arch mới, thêm syscall vào deny-list có test | P2 | 1 buổi | — | `breakout` fail trên cả 4 arch; không ảnh hưởng 54 test cũ |
 
 ### Track B — Rootfs, build & release · owner: Huy
 
 | ID | Việc | Ưu tiên | Ước lượng | Phụ thuộc | Điều kiện xong |
 |---|---|---|---|---|---|
-| **B1 / R5-2** | Build thật 3 profile còn lại (`iot-gateway`, `python-edge`, `web-proxy`) trên Buildroot | P0 | 2–4 buổi (máy yếu lâu hơn) | `profiles/*.defconfig` đã validate | `rootfs.tar.gz` chạy được `minicontainer run`; đo kích thước/RAM thực tế, ghi vào `profiles/README.md` |
-| **B2 / R5-1** | CI GitHub Actions 4 arch đã xanh (run `40842042612`); còn: cache toolchain + thử release theo tag | P0 | 0.5 buổi | Repo đã push | 4 artifact build xanh (**xong**); tag `v*` tạo release có checksum (B3) |
-| **B3 / R4-3** | Đóng gói release tarball (binary + README + test.sh + checksum) | P1 | 0.5 buổi | B2 | `release.sh` chạy end-to-end; tarball cài trên box không lỗi |
-| **B4** | `profiles/build.sh`: thêm `--clean`, kiểm tra dung lượng đĩa trước build, log rõ | P2 | 0.5 buổi | B1 | Build lại từ đầu bằng 1 lệnh; lỗi thiếu dung lượng báo trước khi build |
+| **B1 / R5-2** | Build thật 3 profile còn lại. 🟡 `web-proxy` ✅ 3 MB (lighttpd 1.4.85), `python-edge` ✅ 24 MB (Python 3.14.8 + pyserial + spidev) — cả hai đã chạy container thật trên box; `iot-gateway` đang build (đã sửa symbol legacy `BR2_PACKAGE_CURL` → `LIBCURL`) | P0 | 2–4 buổi (máy yếu lâu hơn) | `profiles/*.defconfig` đã validate | `rootfs.tar.gz` chạy được `minicontainer run`; đo kích thước/RAM thực tế, ghi vào `profiles/README.md` |
+| **B2 / R5-1** | CI GitHub Actions 4 arch đã xanh (run `40842042612`); còn: cache toolchain + thử release theo tag `v1.3.0` | P0 | 0.5 buổi | Repo đã push | 4 artifact build xanh (**xong**); tag `v*` tạo release có checksum (B3) |
+| **B3 / R4-3** | ~~Đóng gói release tarball~~ ✅ **DONE 2026-10-29**: `release.sh` đọc version từ `src/main.c`, đóng binary + test/soak/bench + profiles + rootfs + `SHA256SUMS.txt`; CI cũng gắn `SHA256SUMS.txt` vào release theo tag (chưa chạy thật) | P1 | 0.5 buổi | B2 | `release.sh` chạy end-to-end; tarball cài trên box không lỗi |
+| **B4** | `profiles/build.sh`: thêm `--clean`, kiểm tra dung lượng đĩa trước build, log rõ (đã sửa đường dẫn toolchain + `chmod +x`) | P2 | 0.5 buổi | B1 | Build lại từ đầu bằng 1 lệnh; lỗi thiếu dung lượng báo trước khi build |
 
 ### Track C — Test, an ninh & độ bền · owner: Dev C
 
 | ID | Việc | Ưu tiên | Ước lượng | Phụ thuộc | Điều kiện xong |
 |---|---|---|---|---|---|
-| **C1 / R5-4** | Mở rộng `test.sh`: health detached, quota detached, `exec`, bridge (khi có) | P0 | 1–2 buổi | A1 | ≥ 40 case, chạy 3 lần liên tiếp đều PASS, không rác cgroup/mount |
-| **C2** | Soak test 24h: 1 container sleep + 1 container ăn RAM, đo RSS host, số cgroup, mount leak | P1 | 1 buổi code + 24h chạy | C1 | Báo cáo số liệu trong `VERIFICATION_LOG.md`; RSS host không tăng theo thời gian |
+| **C1 / R5-4** | ~~Mở rộng `test.sh`~~ ✅ **DONE 2026-10-29**: 54 case (thêm exec 5, bridge 6, `/dev` 4); **54/54 PASS** trên box | P0 | 1–2 buổi | A1 | ≥ 40 case, chạy 3 lần liên tiếp đều PASS, không rác cgroup/mount |
+| **C2** | Soak test 24h. 🟡 Smoke `ITER=200` **DONE**: 146s, 0 lỗi, 0 leak, MemAvailable +3 MB. Chưa chạy 24h (`HOUR=24 bash soak.sh`) | P1 | 1 buổi code + 24h chạy | C1 | Báo cáo số liệu trong `VERIFICATION_LOG.md`; RSS host không tăng theo thời gian |
 | **C3** | Security regression: `bomb`, `breakout`, mount, ptrace, `open_by_handle_at`; thử escape bằng userns | P1 | 1–2 buổi | — | Mọi vector bị chặn; ghi lại syscall + errno thực tế |
 | **C4** | Test đa kiến trúc: chạy binary x86_64/armv7l trên máy thật/VM/QEMU | P2 | 1–2 buổi | B2 | Ghi rõ cái nào chạy thật, cái nào chỉ QEMU trong log |
 
@@ -97,7 +102,7 @@ Mỗi track có 1 owner chính. Cột "Owner" đang để trống — điền t�
 | **D1** | `README.md` bản tiếng Việt cho người mới: cài đặt, 5 lệnh đầu tiên, troubleshooting | P0 | 1 buổi | — | Người chưa biết project làm theo được trong ≤15 phút |
 | **D2** | `profiles/README.md`: mô tả 4 profile, static vs dynamic, cách build/deploy | P0 | 0.5 buổi | B1 | Có bảng kích thước thực tế + lệnh copy-paste |
 | **D3** | Demo script 5 phút (asciinema/video): chạy container, giới hạn RAM, quota, kill | P1 | 1 buổi | C1 | Video/script chạy lại được, không cắt ghép |
-| **D4** | Cập nhật `BAOCAO.md`/slide theo số liệu v1.2.0 | P1 | 1 buổi | C2, B1 | Số liệu khớp `VERIFICATION_LOG.md`, không còn số cũ |
+| **D4** | Cập nhật `BAOCAO.md`/slide theo số liệu v1.3.0 | P1 | 1 buổi | C2, B1 | Số liệu khớp `VERIFICATION_LOG.md`, không còn số cũ |
 
 ---
 
@@ -147,7 +152,7 @@ ssh root@<BOX_IP> 'bash /opt/test.sh'
 
 ## 6. Backlog đã xong (để không nhận trùng)
 
-R1-1 signal forwarding · R1-2 validate input · R1-3 cảnh báo OCI · R2-1 disk quota · R3-1 test CPU/IO · R3-2 JSON output · R4-1 `stop --timeout` · R4-2 `--version` + docs · F9 PID reuse · dọn cgroup/mount/state (v1.1.0) · health check detached (v1.2.0) · 4 defconfig profile (validate 2026-10-29).
+R1-1 signal forwarding · R1-2 validate input · R1-3 cảnh báo OCI · R2-1 disk quota · R3-1 test CPU/IO · R3-2 JSON output · R4-1 `stop --timeout` · R4-2 `--version` + docs · F9 PID reuse · dọn cgroup/mount/state (v1.1.0) · health check detached (v1.2.0) · 4 defconfig profile (validate 2026-10-29) · `exec` qua setns + `--net=bridge` + `/dev` tự tạo + soak script + release checksum (v1.3.0).
 
 ## 7. Việc chưa nên làm (tránh phân tâm)
 

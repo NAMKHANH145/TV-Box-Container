@@ -133,3 +133,92 @@ Release-on-tag was skipped (not a tag) and remains untested.
 Remaining: R5-2 3 dynamic profiles not built, R5-3 bridge/exec, release tag,
 T3 24h soak.
 
+
+## Update — v1.3.0 exec + bridge verified (2026-10-29)
+
+Binary: 124,424 B aarch64 musl static (md5 `b8fb3e5ad34bc0e5c003f4bce889555f`, v1.3.0). Build: 0 warnings.
+
+| Test | Result |
+|------|--------|
+| Full suite `test.sh` | **54/54 PASS** (was 39) |
+| `exec <id>` uid inside container | 0 |
+| `exec <id>` PID of the exec'd shell | != 1 (shares container PID ns) |
+| `exec <id>` seccomp still applied | `mount` denied |
+| `exec <id>` cgroup | `/proc/self/cgroup` == `/proc/1/cgroup` |
+| `exec` unknown id | rejected, non-zero exit |
+| `--net=bridge` state file | `/run/minicontainer/<id>/ip` in 10.88/16 |
+| host → container | `ping -c2` 0% loss (0.47ms avg) |
+| container → container | `ping -c2` 0% loss (0.73ms avg) |
+| inside container | `eth0` + default route via 10.88.0.1 |
+| two containers | distinct IPs |
+| after `stop`/`rm` | no `mcv*` veth left, `mcbr0` NO-CARRIER, 0 cgroups, 0 state dirs |
+| regression `--net=host` | routes visible = host's, uid 0, PASS |
+| regression `--net=isolated` | no `ip` file, PASS |
+| Latency (`T7`) | see suite output (<500ms assert) |
+
+Note: `/sys/class/net` is intentionally absent inside the container (no `--sys`),
+so the bridge check reads `/proc/net/route` instead.
+
+### /dev trong container (profile động)
+
+Rootfs Buildroot build bằng user thường có `/dev` rỗng (device node chỉ tạo khi
+build chạy root). Detached run chết ngay ở `open /dev/null`. Sau khi `ns.c` tự
+mount tmpfs `/dev` + bind node từ host (`mknod` bị kernel từ chối trong userns):
+
+| Test | Result |
+|---|---|
+| `[ -c /dev/null ]` trong container (rootfs có sẵn /dev) | PASS |
+| `echo x > /dev/null`, `dd if=/dev/urandom bs=1 count=4` | PASS |
+| Rootfs copy **không có** `/dev` (`test.sh: nodev_check`) | PASS — runtime tự tạo |
+| `python-edge` detached `sleep 120` | RUNNING (trước đây STOPPED ngay) |
+| `ls -l /dev` trong container | null/random/urandom/zero/tty/console + fd/stdin/stdout/stderr |
+
+### Profiles chạy thật trên box
+
+| Profile | Dung lượng (giải nén) | Chạy thật |
+|---|---|---|
+| `base-mini` | 1.3 MB | toàn bộ suite PASS với rootfs này |
+| `web-proxy` | 2.6 MB (tar.gz 1.4 MB) | lighttpd 1.4.85, HTTP 200 |
+| `iot-gateway` | 14.1 MB (tar.gz 6.9 MB) | xem mục MQTT bên dưới |
+| `python-edge` | 22.2 MB (tar.gz 9.7 MB) | Python 3.14.8, `import serial, spidev` OK |
+
+Demo chéo qua `--net=bridge`: server `web-proxy` bind 0.0.0.0:**8080** (port <1024
+bị từ chối trong container — mapped root không có `CAP_NET_BIND_SERVICE`), host
+`curl http://10.88.x.x:8080/` → `<h1>minicontainer OK</h1>`, HTTP 200; client
+`python-edge` ở container khác dùng `urllib` → `GET -> 200`. Broker RSS 528 KB,
+1 pid. Sau `stop`/`rm`: 0 cgroup, 0 veth, 0 state dir, 0 mount.
+
+### Soak smoke (`build/soak.sh`, ITER=200)
+
+```
+soak: ITER=200  start cgroups=0 mounts=0 state=0 MemAvailable=1591408kB
+  100/200  elapsed=73s   MemAvailable=1590004kB  err=0 leak=0
+  200/200  elapsed=146s  MemAvailable=1594800kB  err=0 leak=0
+soak xong: 200 vong, elapsed=146s, loi=0, lan-leak=0
+  cuoi: cgroups=0 mounts=0 state=0 MemAvailable=1594800kB (giam -3kB)
+SOAK OK
+```
+
+Mỗi 5 vòng alternating: foreground run, `--ram/--cpu`, `--net=isolated`,
+`--pids/--disk`, và `run -d --net=bridge` + `exec` + `stop` + `rm`. Kiểm tra
+rác mỗi 20 vòng (cgroup, mount, `/run/minicontainer`).
+
+### Da kien truc (C4) — cai nao chay that, cai nao chi QEMU
+
+Build local bang cross-gcc (`make CC=<tuple>-gcc STRIP=<tuple>-strip`), chay thu:
+
+| Arch | Cach build | Chay o dau | Ket qua |
+|---|---|---|---|
+| aarch64 | Buildroot musl + `aarch64-linux-gnu-gcc` | **TV Box that** (kernel 6.18.38-meson64) | 54/54 PASS, exec/bridge/health/disk that |
+| aarch64 | `aarch64-linux-gnu-gcc` (glibc static) | qemu-user (`qemu-aarch64-static`) | `--version`, `ps` chay duoc — **khong** tao container duoc (can root) |
+| armv7l | `arm-linux-gnueabihf-gcc` | qemu-user (`qemu-arm-static`) | `--version`, validate `--cpu=200` bi tu choi — chi emulator |
+| x86_64 | `gcc -static` (trên máy dev) | **native that** | `--version`, `ps`, validate `--ram=abc`, `--rootfs` — container that can root |
+| riscv64 | CI `riscv64-linux-gnu-gcc` | chua chay thu (may dev chua cai cross-gcc + chưa lấy artifact) | moi xac nhan **build** xanh trong CI |
+
+Ket luan: duong dan/namespace/seccomp duoc **verify bang phan cung that** chi voi
+aarch64. armv7l/x86_64 moi chung minh binary nap va parse lenh dung; riscv64 moi
+build. Chua co ket nao chay container da kien truc tren QEMU system (can root
+trong image cua chinh kien truc do).
+
+Remaining: 24h soak (T3) — chạy `HOUR=24 bash soak.sh`; MQTT publish/subscribe
+của `iot-gateway`; xác nhận release job theo tag; riscv64 chưa chạy thử.

@@ -1,5 +1,71 @@
 # CHANGELOG — minicontainer
 
+## [1.3.0] - 2026-10-29
+
+### Added
+- **`exec <id> <cmd>`** (`build/src/exec.c`): run a second process inside a
+  running container with `setns()` (user → net/uts/ipc → mnt → pid), re-rooting
+  through an `O_PATH` fd on `/proc/<pid>/root`, then `fork()` + `execvp`. The
+  child joins the container cgroup and installs the same seccomp filter, so it
+  sees uid 0, PID ≠ 1, and cannot `mount`. Namespaces identical to the caller's
+  are skipped (joining the host netns after the container userns would return
+  EPERM). No `nsenter`/iproute2 dependency.
+- **`--net=bridge`** (`build/src/bridge.c`): shared bridge `mcbr0`
+  (10.88.0.1/16) plus one veth pair per container (`mcv<pid>`/`mcc<pid>`). The
+  host side uses `ip` from iproute2; the container side renames to `eth0` and
+  sets address/netmask/default route with ioctls only, so the rootfs needs no
+  `ip`. The chosen address is recorded in `/run/minicontainer/<id>/ip`. No NAT:
+  container↔container and container↔10.88.0.1 work out of the box; LAN access
+  requires the host to route 10.88/16. Missing `ip`/kernel modules produce an
+  explicit error instead of a silent host fallback.
+- `build/soak.sh` — repeated-run leak check (cgroups, mounts, `/run` state,
+  MemAvailable delta), optional `ITER=`/`HOUR=`.
+- **Container `/dev`** (`ns.c: dev_setup()`): a Buildroot rootfs only has device
+  nodes when it was built as root, so the dynamic profiles shipped an empty
+  `/dev` and every detached run died on `open /dev/null`. The child now mounts a
+  private tmpfs on `<rootfs>/dev` before `chroot` and creates
+  `null/zero/random/urandom/tty/console` plus the `fd`/`stdin`/`stdout`/`stderr`
+  symlinks. `mknod` is refused inside this userns, so the nodes are
+  bind-mounted from the host; a warning is printed if `/dev/null` still cannot
+  be created.
+- `profiles/` — 4 Buildroot profiles (`base-mini`, `web-proxy`, `iot-gateway`,
+  `python-edge`) + `build.sh`; two dynamic profiles built and measured.
+
+### Changed
+- `release.sh` reads the version from `src/main.c`, stages binary + test/soak/
+  bench + profiles + rootfs, and emits `SHA256SUMS.txt` for the tree and the
+  tarball; CI attaches `SHA256SUMS.txt` to tagged releases.
+- `--net` validation now accepts `host|isolated|bridge`.
+- `rm` also clears the `ip` state file.
+
+### Fixed
+- `iot-gateway.defconfig` used the legacy `BR2_PACKAGE_CURL` symbol (build
+  aborted with "legacy configuration"); now `BR2_PACKAGE_LIBCURL` +
+  `BR2_PACKAGE_LIBCURL_CURL`.
+- `profiles/build.sh` looked for the toolchain under a stale path and was not
+  executable (rc=126).
+- CI x86_64: `musl-gcc` from musl-tools has no kernel headers
+  (`linux/audit.h: No such file`); the x86_64 matrix entry builds with
+  `gcc -static`.
+
+### Verified
+- TV Box S905W, kernel 6.18.38-meson64: `test.sh` **54/54 PASS** (5 new `exec`
+  cases, 6 new bridge cases: state IP, host→container ping, `eth0`+default
+  route, container↔container ping, unique addresses, veth auto-cleanup; 4 new
+  `/dev` cases incl. a rootfs with an empty `/dev`).
+  `--net=host`/`isolated`, detach lifecycle and cgroup cleanup unaffected.
+- Profiles on hardware: `web-proxy` 3 MB (lighttpd 1.4.85) and `python-edge`
+  24 MB (Python 3.14.8, `import serial, spidev` OK) run as real containers;
+  a `web-proxy` server on `--net=bridge` answered `GET /` → HTTP 200 for a
+  `python-edge` client container (528 KB RSS, 1 pid).
+- Soak smoke: `ITER=200` → 200 cycles in 146 s, 0 errors, 0 leak reports,
+  MemAvailable +3 MB drift (no regression).
+
+### Known limitations added
+- Ports below 1024 cannot be bound inside a container: mapped uid 0 has no
+  `CAP_NET_BIND_SERVICE` in the init user namespace (same as Docker with
+  userns-remap). Use `--net=bridge`/`host` with a high port.
+
 ## [1.2.0] - 2026-10-29
 
 ### Added
