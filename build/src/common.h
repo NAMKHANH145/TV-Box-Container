@@ -93,11 +93,14 @@ void parse_args(int argc, char **argv, struct cfg *c);
 void print_usage(const char *prog);
 
 int valid_name(const char *s);
+int run_wait(char *const av[]);
+int run_capture(char *const av[], char *out, size_t n);
 void validate_input(struct cfg *c);
 void kill_pids_in_cgroup(const char *cgdir, int sig);
 
 int do_service_create(int argc, char **argv);
 int do_pull(int argc, char **argv);
+int do_sdk(int argc, char **argv);
 
 #ifndef SYS_pivot_root
 #define SYS_pivot_root 217

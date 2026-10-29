@@ -52,6 +52,51 @@ int read_small(const char *path, char *buf, size_t n) {
 	return 0;
 }
 
+/* Chay lenh voi argv tuc tinh (khong qua shell): dung cho tar/curl/sha256sum. */
+int run_wait(char *const av[]) {
+	pid_t p = fork();
+	if (p < 0) return -1;
+	if (p == 0) {
+		execvp(av[0], av);
+		_exit(127);
+	}
+	int st;
+	while (waitpid(p, &st, 0) < 0 && errno == EINTR)
+		;
+	if (!WIFEXITED(st)) return -1;
+	return WEXITSTATUS(st);
+}
+
+/* Nhu run_wait nhung bat stdout vao out (cat ngan). */
+int run_capture(char *const av[], char *out, size_t n) {
+	int fds[2];
+	if (pipe(fds) < 0) return -1;
+	pid_t p = fork();
+	if (p < 0) { close(fds[0]); close(fds[1]); return -1; }
+	if (p == 0) {
+		close(fds[0]);
+		if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
+		close(fds[1]);
+		execvp(av[0], av);
+		_exit(127);
+	}
+	close(fds[1]);
+	size_t used = 0;
+	for (;;) {
+		ssize_t r = read(fds[0], out + used, n - used - 1);
+		if (r <= 0) break;
+		used += (size_t)r;
+		if (used + 1 >= n) break;
+	}
+	out[used] = '\0';
+	close(fds[0]);
+	int st;
+	while (waitpid(p, &st, 0) < 0 && errno == EINTR)
+		;
+	if (!WIFEXITED(st)) return -1;
+	return WEXITSTATUS(st);
+}
+
 int valid_name(const char *s) {
 	if (!s || *s == '\0') return 0;
 	if (strcmp(s, "..") == 0) return 0;

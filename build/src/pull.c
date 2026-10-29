@@ -22,49 +22,8 @@ static int is_known_profile(const char *p) {
 }
 
 /* chay lenh, tra ve exit code (khong bat output) */
-static int run_wait(char *const av[]) {
-	pid_t p = fork();
-	if (p < 0) return -1;
-	if (p == 0) {
-		execvp(av[0], av);
-		_exit(127);
-	}
-	int st;
-	while (waitpid(p, &st, 0) < 0 && errno == EINTR)
-		;
-	if (!WIFEXITED(st)) return -1;
-	return WEXITSTATUS(st);
-}
 
 /* chay lenh, bat stdout vao out (cat ngan), tra ve exit code */
-static int run_capture(char *const av[], char *out, size_t n) {
-	int fds[2];
-	if (pipe(fds) < 0) return -1;
-	pid_t p = fork();
-	if (p < 0) { close(fds[0]); close(fds[1]); return -1; }
-	if (p == 0) {
-		close(fds[0]);
-		if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(127);
-		close(fds[1]);
-		execvp(av[0], av);
-		_exit(127);
-	}
-	close(fds[1]);
-	size_t used = 0;
-	for (;;) {
-		ssize_t r = read(fds[0], out + used, n - used - 1);
-		if (r <= 0) break;
-		used += (size_t)r;
-		if (used + 1 >= n) break;
-	}
-	out[used] = '\0';
-	close(fds[0]);
-	int st;
-	while (waitpid(p, &st, 0) < 0 && errno == EINTR)
-		;
-	if (!WIFEXITED(st)) return -1;
-	return WEXITSTATUS(st);
-}
 
 static int copy_file(const char *src, const char *dst) {
 	int in = open(src, O_RDONLY | O_CLOEXEC);
