@@ -23,7 +23,7 @@ echo "=== Copying artifacts ==="
 cp minicontainer test.sh bench.sh "$STAGE/"
 for d in ../profiles/*.defconfig; do cp "$d" "$STAGE/profiles/"; done
 cp ../profiles/README.md "$STAGE/profiles/"
-for f in ../README.md ../CHANGELOG.md ../GUIDE.md ../BAOCAO.md; do
+for f in ../README.md ../GUIDE.md ../FINAL.md ../PLAN.md ../TASK.md; do
   cp "$f" "$STAGE/" 2>/dev/null || true
 done
 
