@@ -1,41 +1,21 @@
 /* run.c — dieu phoi 1 lan chay: cgroup -> clone -> maps -> go -> detach/wait */
 #include "common.h"
 
-static pid_t g_child_pid = 0;
-static char *g_cgdir = NULL;
-static struct cfg *g_cfg = NULL;
+static volatile pid_t g_child_pid;
+static volatile sig_atomic_t g_stop_sig;
 
-static void cleanup_and_exit(int sig) {
-	if (g_child_pid > 0) {
-		kill(g_child_pid, SIGKILL);
-		for (int i = 0; i < 40; i++) {
-			if (waitpid(g_child_pid, NULL, WNOHANG) != 0) break;
-			usleep(2000);
-		}
-		kill(g_child_pid, SIGKILL);
-		waitpid(g_child_pid, NULL, 0);
-	}
-	/* kill all procs in cgroup (may be grandchildren) */
-char cgpath[512];
-snprintf(cgpath, sizeof(cgpath), "%s/cgroup.procs", g_cgdir);
-FILE *fp = fopen(cgpath, "r");
-if (fp) {
-    char lb[64];
-    while (fgets(lb, sizeof lb, fp)) {
-        pid_t kg = atoi(lb);
-        if (kg > 0) kill(kg, SIGKILL);
-    }
-    fclose(fp);
-}
-usleep(1500000); /* let kernel empty cgroup */ 
-rmdir(g_cgdir);
-if (g_cfg && g_cgdir) cgroup_cleanup(g_cfg, g_cgdir);
-usleep(1500000); /* let fs flush */
-_exit(128 + sig);
+/* Handler chi lam 2 viec async-signal-safe: ghi co + kill con.
+ * fopen/rmdir/usleep/cgroup_cleanup KHONG duoc goi trong handler (khong
+ * async-signal-safe, co the deadlock neu signal den giua malloc/stdio);
+ * phan don dep chay sau waitpid trong ngu canh binh thuong.
+ * SA_RESTART: waitpid duoc khoi phuc, nhung con da bi kill nen no tra ve. */
+static void on_stop(int sig) {
+	g_stop_sig = sig;
+	if (g_child_pid > 0) kill(g_child_pid, SIGKILL);
 }
 
 static void setup_signal_handlers(void) {
-	struct sigaction sa = { .sa_handler = cleanup_and_exit, .sa_flags = SA_RESTART };
+	struct sigaction sa = { .sa_handler = on_stop, .sa_flags = SA_RESTART };
 	sigemptyset(&sa.sa_mask);
 	sigaction(SIGINT, &sa, NULL);
 	sigaction(SIGTERM, &sa, NULL);
@@ -85,8 +65,6 @@ int do_run(struct cfg *c) {
 
 	/* Thiet lap signal handler de forward signal cho child */
 	g_child_pid = child;
-	g_cgdir = cgdir;
-	g_cfg = c;
 	setup_signal_handlers();
 	setup_tick();
 
@@ -235,9 +213,13 @@ int do_run(struct cfg *c) {
 		usleep(1000); /* tranh vong lap nong neu tick bi tre */
 	}
 
+	/* Ctrl-C / SIGTERM: handler da kill con; don cac tien trinh con chau
+	 * con lai trong cgroup roi moi xoa. */
+	if (g_stop_sig) cgroup_kill(cgdir);
 	cgroup_cleanup(c, cgdir);
 	if (have_bc) bridge_teardown(child);
 	free(stack);
+	if (g_stop_sig) return 128 + g_stop_sig;
 	if (disk_killed) return 128 + SIGKILL;
 	return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
 }
