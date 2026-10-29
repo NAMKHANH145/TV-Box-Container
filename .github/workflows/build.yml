@@ -3,10 +3,28 @@ name: Build and Release
 on:
   workflow_dispatch:
   push:
+    branches:
+      - main
     tags:
       - 'v*'
+  pull_request:
 
 jobs:
+  # Nhanh: sdk khong can root/namespace nen test duoc ngay tren runner.
+  # Chay truoc job build 4 arch de PR biet ket qua trong ~40 s.
+  smoke-sdk:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build x86_64 (musl)
+        run: |
+          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
+            muslcc/x86_64:x86_64-linux-musl \
+            sh -c 'rm -f minicontainer && gcc -static -O2 -Wall -o minicontainer src/*.c && strip -s minicontainer'
+          stat -c '%n %s bytes' build/minicontainer
+      - name: sdk init/pack (11 check, khong can root)
+        run: bash build/smoke-sdk.sh
+
   build:
     runs-on: ubuntu-24.04
     strategy:
@@ -53,7 +71,8 @@ jobs:
           mkdir -p dist
           cp build/minicontainer dist/minicontainer-linux-${{ matrix.arch }}
           cp build/test.sh dist/test.sh
-          chmod +x dist/minicontainer-linux-${{ matrix.arch }}
+          cp build/smoke-sdk.sh dist/smoke-sdk.sh
+          chmod +x dist/minicontainer-linux-${{ matrix.arch }} dist/smoke-sdk.sh
           file dist/minicontainer-linux-${{ matrix.arch }}
           stat -c '%n %s bytes' dist/minicontainer-linux-${{ matrix.arch }}
 
@@ -79,7 +98,7 @@ jobs:
       - name: Checksums
         run: |
           cd dist
-          sha256sum minicontainer-linux-* test.sh > SHA256SUMS.txt
+          sha256sum minicontainer-linux-* test.sh smoke-sdk.sh > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -88,4 +107,5 @@ jobs:
           files: |
             dist/minicontainer-linux-*
             dist/test.sh
+            dist/smoke-sdk.sh
             dist/SHA256SUMS.txt

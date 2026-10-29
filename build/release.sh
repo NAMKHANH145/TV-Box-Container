@@ -20,7 +20,7 @@ rm -rf release
 mkdir -p "$STAGE/rootfs" "$STAGE/profiles"
 
 echo "=== Copying artifacts ==="
-cp minicontainer test.sh bench.sh "$STAGE/"
+cp minicontainer test.sh smoke-sdk.sh bench.sh "$STAGE/"
 for d in ../profiles/*.defconfig; do cp "$d" "$STAGE/profiles/"; done
 cp ../profiles/README.md "$STAGE/profiles/"
 for f in ../README.md ../GUIDE.md ../FINAL.md ../PLAN.md ../TASK.md ../LICENSE; do
