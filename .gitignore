@@ -11,6 +11,7 @@ build/bomb
 build/breakout
 build/*.tar
 build/*.tar.gz
+build/*.tar.gz.sha256
 
 # Test/scratch output
 *.log
