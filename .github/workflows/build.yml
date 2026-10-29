@@ -14,35 +14,39 @@ jobs:
       matrix:
         include:
           - arch: aarch64
-            cc: aarch64-linux-gnu-gcc
-            strip: aarch64-linux-gnu-strip
-            pkg: gcc-aarch64-linux-gnu
+            musl: aarch64-linux-musl
           - arch: armv7l
-            cc: arm-linux-gnueabihf-gcc
-            strip: arm-linux-gnueabihf-strip
-            pkg: gcc-arm-linux-gnueabihf
+            musl: armv7l-linux-musleabihf
           - arch: x86_64
-            cc: gcc
-            strip: strip
-            pkg: gcc
+            musl: x86_64-linux-musl
           - arch: riscv64
-            cc: riscv64-linux-gnu-gcc
-            strip: riscv64-linux-gnu-strip
-            pkg: gcc-riscv64-linux-gnu
+            musl: riscv64-linux-musl
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Install toolchain
+      # musl.cc truncates requests from GitHub runner IPs ("Actions has been
+      # blocked wholesale"), so the maintainer-published Docker images are the
+      # only reliable way to get gcc+musl here. musl is what keeps the assets
+      # ~100-130KB: glibc static costs 620-930KB for the same code.
+      # Flags mirror build/Makefile (the images ship no make, only the compiler).
+      - name: Build static binary (musl)
         run: |
-          sudo apt-get update
-          sudo apt-get install -y ${{ matrix.pkg }} file
+          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
+            muslcc/x86_64:${{ matrix.musl }} \
+            sh -c 'rm -f minicontainer && gcc -static -O2 -Wall -o minicontainer src/*.c && strip -s minicontainer'
+          stat -c '%n %s bytes' build/minicontainer
 
-      - name: Build static binary
+      - name: Check binary is static and not bloated
         run: |
-          cd build
-          make clean
-          make CC=${{ matrix.cc }} STRIP=${{ matrix.strip }}
+          file build/minicontainer
+          size=$(stat -c '%s' build/minicontainer)
+          # A glibc-static build of this code is 600KB+; anything over 200KB
+          # means the wrong libc slipped in.
+          if [ "$size" -gt 200000 ]; then
+            echo "minicontainer is $size bytes - expected a musl static build under 200000" >&2
+            exit 1
+          fi
 
       - name: Package
         run: |
