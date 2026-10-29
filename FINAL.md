@@ -476,3 +476,15 @@ hạn chế, zero-daemon, có số liệu đo thật và test tự động trên
 `exec`, bridge, `--read-only`, `pull`, `sdk`) đã xong; phần runtime verify trên phần cứng thật,
 `sdk` verify bằng test tự động (không cần root). Phần còn lại là việc hạ tầng (soak 24 h, runner tự
 host, LICENSE), không phải tính năng runtime.
+---
+
+## 14. Chuẩn bị bảo vệ — câu hỏi khó và câu trả lời có bằng chứng
+
+| Câu hỏi | Trả lời ngắn (kèm nơi có bằng chứng) |
+|---|---|
+| Sao không dùng `pivot_root` như tài liệu container chuẩn? | Đã dùng ở phase 8 khi container chạy root thật; khi thêm userns (v1.1.0) `pivot_root` trả `EPERM` trên `6.18.38-meson64` ở mọi cấu hình đã thử → chốt `chroot` + `chdir("/")`. Về bảo mật, kỹ thuật chroot-break cần quyền host, trong khi tiến trình chỉ là `nobody` (65534) ngoài namespace và không có `CAP_SYS_CHROOT`/`CAP_SYS_ADMIN` (§6.2). |
+| Sao không nhúng `runc`/`crun` rồi gọi? | Mục tiêu là **zero-daemon, 1 binary, không stack**: `runc`/`crun` vẫn cần nơi tạo namespace, image/layer, config; `runc` ~224 ms và ~MB, `crun` ~47 ms. Ở đây `clone()` + `chroot` + cgroupfs + `execvp()` trực tiếp: 10–65 ms, 145 KB, 0 MB idle. Đánh đổi chấp nhận: **không chạy được image Docker/k8s** (§9, §11). |
+| `--disk` có phải quota thật không? | **Không.** Kernel box không có ext4 project quota (`quotactl` không hỗ trợ). Có 2 lớp: `RLIMIT_FSIZE` chặn tức thời **một file** (exit 153/SIGXFSZ), watchdog `nftw` 1 s chặn **tổng dung lượng** (burst xấu nhất ≈ 1 chu kỳ lấy mẫu). Nói rõ giới hạn này thay vì gọi là quota (§6.3, §7 #15). |
+| Bảo mật có tương đương Docker không? | Ba lớp: mount namespace private (`MS_REC\|MS_PRIVATE`) → userns map root trong ↔ 65534 ngoài → seccomp 21 syscall + `NO_NEW_PRIVS`; test `bomb`/`breakout`/`mount`/`ptrace`/`open_by_handle_at` đều bị chặn (§6.4, §8.1). **Không** tương đương: thiếu AppArmor/SELinux, deny-list chứ không allow-list, không `/sys`, không user namespace tuỳ biến. |
+| 74 hay 84 test? Có phải tất cả chạy trên box? | 74/74 là **trên box** ở v1.4.0. Suite hiện **84 case**: 10 case `sdk` mới chạy trên laptop (sdk không cần root/namespace). `test.sh` in `TONG=` ở dòng cuối để không lệch số. Phần cứng thật mới verify **aarch64**; 3 arch còn lại mới ở mức QEMU-user (§8.3). |
+| Nếu kernel thiếu userns thì sao? | Box này có userns (đã map `0 65534 1` thành công). Thiếu userns thì "root trong container" = root trên host, mất một lớp phòng thủ; khi đó chỉ còn mount ns + seccomp và phải hạ tuyên bố bảo mật. Đây là lý do `FINAL §11` ghi rõ giới hạn thay vì quảng bá "an toàn như VM". |
