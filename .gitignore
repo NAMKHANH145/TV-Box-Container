@@ -1,0 +1,30 @@
+# Buildroot source trees and outputs (GBs, never commit)
+build/buildroot/
+build/rootfs-buildroot/
+build/rootfs-*/
+build/release/
+build/oci-test/rootfs/
+
+# Build artifacts
+build/minicontainer
+build/bomb
+build/breakout
+build/*.tar
+build/*.tar.gz
+
+# Test/scratch output
+*.log
+*.tmp
+/tmp/
+
+# Editors / OS
+.vscode/
+.idea/
+.DS_Store
+
+# Qoder session metadata (may contain chat logs)
+.qoder/
+
+# Local credentials
+*.pass
+deploy/*.pass

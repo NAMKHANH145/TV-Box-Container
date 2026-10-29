@@ -1,0 +1,15 @@
+# Buildroot defconfig — base-mini profile
+# BusyBox + musl static, ~1.3MB. Use for shell scripts, cron jobs, sandboxes.
+# Build: ./profiles/build.sh base-mini
+
+BR2_aarch64=y
+BR2_cortex_a53=y
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_STATIC_LIBS=y
+BR2_PACKAGE_BUSYBOX=y
+
+BR2_TARGET_GENERIC_HOSTNAME="base-mini"
+BR2_TARGET_GENERIC_ISSUE="minicontainer base-mini (buildroot)"
+BR2_TARGET_ROOTFS_TAR=y
+BR2_TARGET_ROOTFS_TAR_GZIP=y
+BR2_CCACHE=y

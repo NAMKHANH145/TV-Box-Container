@@ -1,0 +1,80 @@
+name: Build and Release
+
+on:
+  workflow_dispatch:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: aarch64
+            cc: aarch64-linux-gnu-gcc
+            strip: aarch64-linux-gnu-strip
+            pkg: gcc-aarch64-linux-gnu
+          - arch: armv7l
+            cc: arm-linux-gnueabihf-gcc
+            strip: arm-linux-gnueabihf-strip
+            pkg: gcc-arm-linux-gnueabihf
+          - arch: x86_64
+            cc: musl-gcc
+            strip: strip
+            pkg: musl-tools
+          - arch: riscv64
+            cc: riscv64-linux-gnu-gcc
+            strip: riscv64-linux-gnu-strip
+            pkg: gcc-riscv64-linux-gnu
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ${{ matrix.pkg }} file
+
+      - name: Build static binary
+        run: |
+          cd build
+          make clean
+          make CC=${{ matrix.cc }} STRIP=${{ matrix.strip }}
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          cp build/minicontainer dist/minicontainer-linux-${{ matrix.arch }}
+          cp build/test.sh dist/test.sh
+          chmod +x dist/minicontainer-linux-${{ matrix.arch }}
+          file dist/minicontainer-linux-${{ matrix.arch }}
+          stat -c '%n %s bytes' dist/minicontainer-linux-${{ matrix.arch }}
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: minicontainer-linux-${{ matrix.arch }}
+          path: dist/
+
+  release:
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/')
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: write
+    steps:
+      - name: Download all binaries
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/minicontainer-linux-*
+            dist/test.sh

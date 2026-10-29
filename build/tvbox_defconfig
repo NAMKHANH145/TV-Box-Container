@@ -1,0 +1,23 @@
+# Buildroot defconfig — rootfs cho minicontainer (S905W / Cortex-A53)
+# Dùng: cp tvbox_defconfig buildroot/.config && make -C buildroot olddefconfig && make -C buildroot -j16
+# Kết quả: buildroot/output/images/rootfs.tar.gz (giải nén ra /opt/rootfs trên box)
+
+BR2_aarch64=y
+BR2_cortex_a53=y
+
+# Toolchain nội bộ musl (tự build trên laptop, box không tốn gì)
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+
+# Hệ thống tối thiểu: chỉ BusyBox (sh/ls/ps), build STATIC toàn bộ để shell
+# trong container không phụ thuộc loader nào của host
+BR2_STATIC_LIBS=y
+BR2_PACKAGE_BUSYBOX=y
+BR2_TARGET_GENERIC_HOSTNAME="minicontainer-os"
+BR2_TARGET_GENERIC_ISSUE="minicontainer-os (buildroot)"
+
+# Output duy nhất: rootfs tar.gz
+BR2_TARGET_ROOTFS_TAR=y
+BR2_TARGET_ROOTFS_TAR_GZIP=y
+
+# Tăng tốc build lại
+BR2_CCACHE=y

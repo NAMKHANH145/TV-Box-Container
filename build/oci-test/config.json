@@ -1,0 +1,11 @@
+{
+  "ociVersion": "1.0.0",
+  "hostname": "oci-demo",
+  "process": { "args": ["/bin/sh", "-c", "echo OCI_OK; hostname"] },
+  "root": { "path": "rootfs" },
+  "linux": { "resources": {
+    "memory": { "limit": 31457280 },
+    "pids": { "limit": 32 },
+    "cpu": { "quota": 20000, "period": 100000 }
+  } }
+}

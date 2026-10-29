@@ -1,0 +1,19 @@
+# Buildroot defconfig — python-edge profile
+# Python 3 + pyserial + spidev for sensors/GPIO gateways. Dynamic musl (~15MB).
+# NOTE: python3 requires !BR2_STATIC_LIBS.
+# Build: ./profiles/build.sh python-edge
+
+BR2_aarch64=y
+BR2_cortex_a53=y
+BR2_TOOLCHAIN_BUILDROOT_MUSL=y
+BR2_PACKAGE_BUSYBOX=y
+
+BR2_PACKAGE_PYTHON3=y
+BR2_PACKAGE_PYTHON_SERIAL=y
+BR2_PACKAGE_PYTHON_SPIDEV=y
+
+BR2_TARGET_GENERIC_HOSTNAME="python-edge"
+BR2_TARGET_GENERIC_ISSUE="minicontainer python-edge (buildroot)"
+BR2_TARGET_ROOTFS_TAR=y
+BR2_TARGET_ROOTFS_TAR_GZIP=y
+BR2_CCACHE=y
