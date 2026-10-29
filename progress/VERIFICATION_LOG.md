@@ -420,6 +420,18 @@ PASS: pull tu thu muc local: sha256 khop + giai nen du
 
 Script chạy bằng binary aarch64 (binfmt/qemu-user) trên laptop; không root, không namespace.
 
+### CI xanh — cùng script, x86_64 thật (`push main`)
+
+```
+gh run view 40943001005      # workflow "Build and Release", event push, main
+✓ smoke-sdk in 12s           build/minicontainer 108896 bytes
+PASS=11 FAIL=0 TONG=11
+✓ build (aarch64) 13s   ✓ build (x86_64) 13s   ✓ build (armv7l) 16s   ✓ build (riscv64) 16s
+- release (bỏ qua: chỉ chạy theo tag)
+```
+
+Đây là lần đầu cổng CI chặn được hồi quy `sdk` trên cả push thường, không chỉ theo tag.
+
 ### `profiles/build.sh` — các nhánh lỗi (không chạy build thật, mất vài giờ)
 
 ```
