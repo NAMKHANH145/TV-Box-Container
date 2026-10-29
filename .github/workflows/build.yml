@@ -22,9 +22,9 @@ jobs:
             strip: arm-linux-gnueabihf-strip
             pkg: gcc-arm-linux-gnueabihf
           - arch: x86_64
-            cc: musl-gcc
+            cc: gcc
             strip: strip
-            pkg: musl-tools
+            pkg: gcc
           - arch: riscv64
             cc: riscv64-linux-gnu-gcc
             strip: riscv64-linux-gnu-strip

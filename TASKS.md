@@ -105,10 +105,10 @@ Mỗi track có 1 owner chính. Cột "Owner" đang để trống — điền t�
 
 | Tuần | Mục tiêu | Người |
 |---|---|---|
-| **Tuần 1** | A1 (health detached) + B1 (build 1 profile) + C1 (test mới) + D1/D2 | Khánh, Huy, C, D |
-| **Tuần 2** | B2 (CI xanh) + B3 (release) + C2 (soak bắt đầu) + A2 (`exec`) | Huy, Khánh, C |
+| **Tuần 1** | B1 (build 1 profile) + C1 (test mới) + D1/D2 + A2 (`exec`) bắt đầu | Khánh, Huy, C, D |
+| **Tuần 2** | B2 (CI xanh) + B3 (release) + C2 (soak bắt đầu) + hoàn tất A2 | Huy, Khánh, C |
 | **Tuần 3** | A3 (`--net=bridge`) + C4 (đa kiến trúc) + D3 (demo) | Khánh, C, D |
-| **Tuần 4** | Đóng băng tính năng, chạy full test 3 lần, D4 (báo cáo), tag `v1.2.0` | Cả nhóm |
+| **Tuần 4** | Đóng băng tính năng, chạy full test 3 lần, D4 (báo cáo), tag `v1.3.0` | Cả nhóm |
 
 Quy tắc: task P0 trễ → cắt P2 trước, **không** cắt test.
 
