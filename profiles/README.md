@@ -80,5 +80,5 @@ ssh root@$BOX 'ls /opt/rootfs-'$P'/bin/busybox && minicontainer run --rootfs /op
 - 2026-10-29: cả 4 defconfig parse thành công với Buildroot `2026.11-git`, các symbol
   `MOSQUITTO(_BROKER/_CLIENTS)`, `OPENSSL`, `SQLITE`, `CURL`, `PYTHON3`, `PYTHON_SERIAL`,
   `PYTHON_SPIDEV`, `LIGHTTPD`, `STATIC_LIBS` đều giữ nguyên trong `.config`.
-- `base-mini` đã build và chạy trên box (rootfs ~1.3 MB, 36/36 test PASS với rootfs này).
+- `base-mini` đã build và chạy trên box (rootfs ~1.3 MB, 39/39 test PASS với rootfs này).
 - 3 profile dynamic: defconfig hợp lệ, **chưa build thật** — đây là việc B1 trong `TASKS.md`.
