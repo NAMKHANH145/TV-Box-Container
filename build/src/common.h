@@ -38,6 +38,7 @@ struct cfg {
 	long io;
 	long max_disk;
 	int detach;
+	int read_only;
 	const char *health_cmd;
 	const char *name;
 	const char *rootfs;
@@ -96,6 +97,7 @@ void validate_input(struct cfg *c);
 void kill_pids_in_cgroup(const char *cgdir, int sig);
 
 int do_service_create(int argc, char **argv);
+int do_pull(int argc, char **argv);
 
 #ifndef SYS_pivot_root
 #define SYS_pivot_root 217

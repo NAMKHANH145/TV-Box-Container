@@ -1,7 +1,7 @@
 /* main.c — dispatch lenh: run/ps/stats/stop/rm/oci-run */
 #include "common.h"
 
-#define VERSION "1.3.0"
+#define VERSION "1.4.0"
 
 #if defined(__aarch64__)
 #define MC_ARCH "aarch64"
@@ -77,6 +77,12 @@ int main(int argc, char **argv) {
 	}
 	if (argc >= 2 && strcmp(argv[1], "service") == 0 && argc >= 4 && strcmp(argv[2], "create") == 0) {
 		return do_service_create(argc, argv);
+	}
+	if (argc >= 3 && strcmp(argv[1], "pull") == 0)
+		return do_pull(argc, argv);
+	if (argc >= 2 && strcmp(argv[1], "pull") == 0) {
+		fprintf(stderr, "Usage: %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] [--force]\n", argv[0]);
+		return 1;
 	}
 	struct cfg c = { .ram = -1, .cpu = -1, .pids = 64, .io = -1, .max_disk = -1, .detach = 0, .name = NULL,
 	                 .rootfs = "/opt/rootfs",

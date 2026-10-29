@@ -34,7 +34,68 @@ static void dev_link(const char *devdir, const char *tgt, const char *name) {
 	char p[PATH_MAX + 64];
 	if (path_join(p, sizeof p, devdir, name) < 0) return;
 	unlink(p);
-	symlink(tgt, p);
+	if (symlink(tgt, p) < 0) return;
+}
+
+static int mkdir_p(char *path) {
+	for (char *s = path + 1; *s; s++) {
+		if (*s != '/') continue;
+		*s = '\0';
+		if (mkdir(path, 0755) < 0 && errno != EEXIST) return -1;
+		*s = '/';
+	}
+	if (mkdir(path, 0755) < 0 && errno != EEXIST) return -1;
+	return 0;
+}
+
+/* --read-only: rootfs chong ghi (chong mon eMMC tren the nho). Bind rootfs
+ * len chinh no trong mount ns tu rieng de co mot mount remount duoc duoc —
+ * MS_REC|MS_PRIVATE da dat o tren nen khong thoat ra host. Cac dir can ghi
+ * duoc lap tmpfs TRUOC khi flip ro, nho do tmpfs van ghi duoc. Goi TRUOC
+ * chroot; viec flip ro lam sau khi mount /proc (mount moi len dir cua mount
+ * read-only bi EROFS). */
+static const char *const rw_dirs[][2] = {
+	{ "tmp",      "mode=1777,size=32M" },
+	{ "run",      "mode=755,size=8M" },
+	{ "var/log",  "mode=755,size=16M" },
+	{ "dev/shm",  "mode=1777,size=64M" },
+};
+
+/* Buildroot/Alpine doi nhieu dir thanh symlink (/var/log -> ../tmp,
+ * /var/run -> ../run). Mount len symlink se deo mount vao dich cua no
+ * (trung /tmp cuon mat mount cua chinh no) -> bo qua: dich cua nhung symlink
+ * ay da nam trong tmpfs ma ta gan o /tmp, /run. */
+static int path_has_symlink(const char *rootfs, const char *rel) {
+	char cur[PATH_MAX + 64], nxt[PATH_MAX + 64], copy[PATH_MAX + 64];
+	struct stat st;
+	if (strlen(rel) >= sizeof copy) return 1;
+	snprintf(cur, sizeof cur, "%s", rootfs);
+	snprintf(copy, sizeof copy, "%s", rel);
+	for (char *tok = strtok(copy, "/"); tok; tok = strtok(NULL, "/")) {
+		if (path_join(nxt, sizeof nxt, cur, tok) < 0) return 1;
+		if (lstat(nxt, &st) == 0 && S_ISLNK(st.st_mode)) return 1;
+		snprintf(cur, sizeof cur, "%s", nxt);
+	}
+	return 0;
+}
+
+static void ro_setup(const char *rootfs) {
+	char p[PATH_MAX + 64];
+	if (strlen(rootfs) > PATH_MAX) die("--read-only: duong dan rootfs qua dai");
+	if (mount(rootfs, rootfs, NULL, MS_BIND | MS_REC, NULL) < 0) {
+		fprintf(stderr, "minicontainer: --read-only: bind rootfs that bai: %s\n",
+			strerror(errno));
+		die("--read-only khong dung duoc voi rootfs nay");
+	}
+	for (size_t i = 0; i < sizeof rw_dirs / sizeof rw_dirs[0]; i++) {
+		if (path_has_symlink(rootfs, rw_dirs[i][0])) continue;
+		if (path_join(p, sizeof p, rootfs, rw_dirs[i][0]) < 0) continue;
+		if (mkdir_p(p) < 0) continue;
+		if (mount("tmpfs", p, "tmpfs", MS_NOSUID | MS_NODEV | MS_STRICTATIME,
+			rw_dirs[i][1]) < 0 && errno != EBUSY)
+			fprintf(stderr, "minicontainer: --read-only: /%s: %s\n",
+				rw_dirs[i][0], strerror(errno));
+	}
 }
 
 /* Rootfs Buildroot chi co /dev khi duoc tao bang root; profile dynamic o day
@@ -102,6 +163,7 @@ int child_fn(void *arg) {
 	if (sethostname(c->hostname, strlen(c->hostname)) < 0) die("sethostname");
 
 	dev_setup(c->rootfs);
+	if (c->read_only) ro_setup(c->rootfs);
 
 	/* chroot isolation (userns-only: root in ns maps to host-nobody) */
 	{
@@ -110,6 +172,16 @@ int child_fn(void *arg) {
 		/* mount proc AFTER chroot */
 		if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
 			if (errno != EBUSY) die("mount /proc");
+		}
+		/* "/" luc nay la bind cua rootfs -> flip sang read-only. Kernel
+		 * khong cho flip bind cua tmpfs (EPERM), nen bao ro cach khac. */
+		if (c->read_only &&
+			mount(NULL, "/", NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL) < 0) {
+			if (errno == EPERM)
+				fprintf(stderr, "minicontainer: --read-only: rootfs nay tren tmpfs"
+					" (kernel khong cho dong bo read-only bind tren tmpfs)."
+					" Dat rootfs tren ext4, vi du /opt/rootfs.\n");
+			die("remount rootfs read-only");
 		}
 	}
 

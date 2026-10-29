@@ -248,6 +248,43 @@ t "stats doc duoc" sh -c "$MC stats $N | grep -q memory"
 t "stop" $MC stop $N
 t "rm" $MC rm $N
 t "ps sach" sh -c "! $MC ps 2>/dev/null | grep -q RUNNING"
+echo "=== --read-only (can eMMC) ==="
+t "ro: /etc khong ghi duoc" $MC run --read-only --rootfs $BR /bin/sh -c 'echo x >/etc/mcro 2>/dev/null; [ ! -e /etc/mcro ]'
+t "ro: /tmp la tmpfs va ghi duoc" $MC run --read-only --rootfs $BR /bin/sh -c 'grep -q " /tmp tmpfs " /proc/mounts && echo ok >/tmp/mcro && [ "$(cat /tmp/mcro)" = ok ]'
+t "ro: /var/log ghi duoc, khong phat sinh mount deo symlink" $MC run --read-only --rootfs $BR /bin/sh -c 'echo ok >/var/log/mcro; [ "$(cat /var/log/mcro)" = ok ]; [ "$(grep -c " /tmp tmpfs " /proc/mounts)" = 1 ]'
+t "ro: /run tmpfs" $MC run --read-only --rootfs $BR /bin/sh -c 'grep -q " /run tmpfs " /proc/mounts'
+t "ro: /dev/null van ghi duoc" $MC run --read-only --rootfs $BR /bin/sh -c 'echo x >/dev/null && [ -c /dev/null ]'
+t "ro: /proc mount duoc" $MC run --read-only --rootfs $BR /bin/sh -c '[ -r /proc/1/cmdline ]'
+t "ro: /etc ben trong van doc duoc" $MC run --read-only --rootfs $BR /bin/sh -c '[ -r /etc/passwd ]'
+t "ro: rootfs tren host khong bi nhiem ro" sh -c 'echo x > /opt/rootfs/tmp/hostprobe; rc=$?; c=$(cat /opt/rootfs/tmp/hostprobe); rm -f /opt/rootfs/tmp/hostprobe; [ $rc -eq 0 ] && [ "$c" = x ]'
+echo "=== pull profile ==="
+PD=/tmp/mcpull; ZEROS=0000000000000000000000000000000000000000000000000000000000000000
+rm -rf $PD; mkdir -p $PD/src/bin $PD/out
+printf '#!/bin/sh\necho ok\n' > $PD/src/bin/hello; chmod +x $PD/src/bin/hello
+tar -czf $PD/base-mini-rootfs.tar.gz -C $PD/src .
+sha256sum $PD/base-mini-rootfs.tar.gz | cut -d' ' -f1 > $PD/sha
+t "pull: giai nen tu nguon dia phuong" sh -c "$MC pull base-mini --url=$PD --dest=$PD/out/hello | grep -q 'pull: xong'"
+t "pull: giu duoc quyen thuc thi" test -x $PD/out/hello/bin/hello
+t "pull: tu choi dest da ton tai" sh -c "! $MC pull base-mini --url=$PD --dest=$PD/out/hello >/dev/null 2>&1"
+t "pull: sha256 dung duoc chap nhan" sh -c "$MC pull base-mini --url=$PD --dest=$PD/out/hello --sha256=$(cat $PD/sha) --force | grep -q 'sha256 khop'"
+t "pull: sha256 sai bi tu choi" sh -c "! $MC pull base-mini --url=$PD --dest=$PD/out/bad --sha256=$ZEROS >/dev/null 2>&1"
+mkdir -p $PD/evilsrc && echo bad > $PD/evilsrc/f
+tar -czPf $PD/evil-abs-rootfs.tar.gz $PD/evilsrc >/dev/null 2>&1
+t "pull: tu choi tar co duong dan tuyet doi" sh -c "! $MC pull evil-abs --url=$PD --dest=$PD/out/evil >/dev/null 2>&1"
+t "pull: dest cua file bi tu choi khong bi tao" sh -c '[ ! -e '"$PD"'/out/evil ]'
+t "pull: khong de lai file staging" sh -c '! ls -a '"$PD"'/out/ 2>/dev/null | grep -q mc-pull'
+IMG=/root/mcpull
+WPDEST=/opt/mc-pull-wp   # read-only can ext4, khong dung /tmp (tmpfs)
+if [ -f $IMG/web-proxy-rootfs.tar.gz ]; then
+  S=$(sha256sum $IMG/web-proxy-rootfs.tar.gz | cut -d' ' -f1)
+  rm -rf $WPDEST
+  t "pull: profile that (web-proxy)" sh -c "$MC pull web-proxy --url=$IMG --dest=$WPDEST --sha256=$S | grep -q 'sha256 khop'"
+  t "pull: chay container tu profile vua pull" $MC run --rootfs $WPDEST /bin/sh -c '[ -c /dev/null ] && echo ok >/tmp/x'
+  t "pull: profile chay duoc --read-only" $MC run --read-only --rootfs $WPDEST /bin/sh -c 'echo x >/tmp/y; ! echo z >/etc/wp 2>/dev/null; [ ! -e /etc/wp ]'
+else
+  echo "SKIP: pull profile that (thieu $IMG/web-proxy-rootfs.tar.gz)"
+fi
+rm -rf $PD $WPDEST
 echo "=== leak ==="
 t "mount leak = 0" sh -c '! mount | grep -qE "/opt/(rootfs|alpine)/"'
 echo "=== T7 latency (assert <500ms) ==="

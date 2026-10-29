@@ -28,12 +28,13 @@ start=$(date +%s)
 i=0
 while [ $i -lt $ITER ]; do
   i=$((i+1))
-  case $(( i % 5 )) in
+  case $(( i % 6 )) in
     0) $MC run --rootfs $BR /bin/true || ERR=$((ERR+1)) ;;
     1) $MC run --ram=64M --cpu=20 --rootfs $BR /bin/sh -c 'echo hi >/dev/null' || ERR=$((ERR+1)) ;;
     2) $MC run --net=isolated --rootfs $BR /bin/sh -c 'cat /proc/net/route >/dev/null' || ERR=$((ERR+1)) ;;
     3) $MC run --pids=64 --disk=50M --rootfs $BR /bin/sh -c 'true' || ERR=$((ERR+1)) ;;
-    4)
+    4) $MC run --read-only --rootfs $BR /bin/sh -c 'echo x >/tmp/sk; echo y >/var/log/sk; (echo z >/etc/sk) 2>/dev/null; [ ! -e /etc/sk ]' || ERR=$((ERR+1)) ;;
+    5)
       [ $HAVE_BRIDGE = 1 ] || continue
       N=s$$
       $MC run -d --name $N --net=bridge --rootfs $BR /bin/sh -c 'sleep 30' >/dev/null 2>&1 || { ERR=$((ERR+1)); continue; }

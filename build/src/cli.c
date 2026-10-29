@@ -29,6 +29,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 		else if (OPT1("--disk") || OPT2("--disk", "--disk=")) cf->max_disk = need_bytes("--disk", val);
 		else if (OPT1("--name") || OPT2("--name", "--name=")) cf->name = val;
 		else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--detach") == 0) cf->detach = 1;
+		else if (strcmp(argv[i], "--read-only") == 0) cf->read_only = 1;
 		else if (OPT1("--health-cmd") || OPT2("--health-cmd", "--health-cmd=")) cf->health_cmd = val;
 		else if (OPT1("--rootfs") || OPT2("--rootfs", "--rootfs=")) cf->rootfs = val;
 		else if (OPT1("--net") || OPT2("--net", "--net=")) cf->net = val;
@@ -41,6 +42,8 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 void print_usage(const char *prog) {
 	fprintf(stderr, "Usage: %s run [--ram=30M] [--cpu=20] [--pids=64] [--io=1M] [--disk=100M] [--detach|-d] [--name=ID]\n"
 		"                  [--net=host|isolated|bridge] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
+		"                  [--read-only]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
-		"       %s oci-run <bundle> | service create <name> <cmd> [args...] | --version\n", prog, prog, prog);
+		"       %s oci-run <bundle> | service create <name> <cmd> [args...] |\n"
+		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] | --version\n", prog, prog, prog, prog);
 }
