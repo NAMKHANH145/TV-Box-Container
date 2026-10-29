@@ -17,27 +17,27 @@ Khắc phục các F1–F9 trong báo cáo tiến độ, chia 5 đợt R1–R5 (
 - [x] **R3-2. Output `--json` cho `ps` và `stats` (F5)**  
 - [x] **R4-1. `--timeout=N` cho `stop` (F6)**  
 - [x] **R4-2. `--version` + man/README/CHANGELOG (F7)** (version + README + CHANGELOG created)  
-- [ ] **R4-3. Release tarball** (needs actual build/test on TV Box)  
-- [ ] **R5-1. Multi-arch Release (CI/CD)** (4 arch build xanh run 40842042612; release tag + SHA256SUMS vừa thêm, chưa chạy thật)  
-- [x] **R5-2. Rootfs Profiles & SDK** (4/4 profile đã build: base-mini 1.3 MB, web-proxy 2.6 MB, iot-gateway 14.1 MB, python-edge 22.2 MB; 3 đã chạy container thật trên box)  
-- [x] **R5-3. Production hardening** (`--net=bridge` + `exec` xong và verify; `service create`, `--health-cmd` foreground + detached; `/dev` tự tạo trong container)
-- [ ] **R5-4. Release gate mở rộng** (54/54 test + soak smoke 200 vòng đạt; còn soak 24h + chạy lại đủ 3 lần liên tiếp)
+- [x] **R4-3. Release tarball** (`release.sh` end-to-end; CI release kèm `SHA256SUMS.txt`, tải asset về chạy `test.sh` trên box: PASS)  
+- [ ] **R5-1. Multi-arch Release (CI/CD)** (2/3: 4 arch build xanh + release theo tag `v1.3.0` có SHA256SUMS, asset aarch64 chạy 55/55 trên box; còn `test.sh` chạy tự động trong CI cần self-hosted runner)  
+- [ ] **R5-2. Rootfs Profiles & SDK** (3/4: 4/4 profile đã build + chạy thật, `pull <profile>` xong; còn `mc-sdk init/pack`)  
+- [x] **R5-3. Production hardening** (`--net=bridge` + `exec` + `service create` + `--health-cmd` foreground/detached + `/dev` tự tạo + `--read-only` chống mòn eMMC — đủ 6/6, verify trên box)
+- [ ] **R5-4. Release gate mở rộng** (74/74 test, 3 lần liên tiếp ở 55 case + soak smoke đạt; còn soak 24h (Khánh chạy riêng) và board thật armv7l/riscv64)
 
 ## Đợt R5 — Production-grade (định hướng sản phẩm)
 
 ### R5-1. Multi-arch Release (CI/CD)
 - [x] GitHub Actions cross-compile 4 arch: aarch64, armv7l, x86_64, riscv64. (run 40842042612, 2026-10-29)
-- [ ] GitHub Releases tự động theo tag, naming `minicontainer-linux-<arch>` + `SHA256SUMS.txt` (workflow đã viết, chưa chạy thật với tag `v1.3.0`).
+- [x] GitHub Releases tự động theo tag, naming `minicontainer-linux-<arch>` + `SHA256SUMS.txt` (tag `v1.3.0`, run 40851398981 xanh; tải asset về verify checksum, bản aarch64 chạy 55/55 test trên box).
 - [ ] CI chạy `test.sh` trên box aarch64 trước khi release.
 
 ### R5-2. Rootfs Profiles & SDK
 - [x] 4 profile defconfig, đã build thật: base-mini 1.3 MB, web-proxy 2.6 MB, iot-gateway 14.1 MB, python-edge 22.2 MB (giải nén).
 - [x] Chạy container thật trên box: lighttpd 1.4.85 (HTTP 200 qua bridge), Python 3.14.8 + pyserial/spidev. iot-gateway mới build, chưa chạy mosquitto.
-- [ ] Lệnh `minicontainer pull <profile>` (curl + giải nén về /opt/rootfs).
+- [x] Lệnh `minicontainer pull <profile>` (curl/wget/đường dẫn local, check dung lượng, `--sha256`, chặn tar có thành viên tuyệt đối/`..`, giải nén qua staging dir rồi rename; 11 case trong `test.sh`).
 - [ ] `mc-sdk init/pack` để đóng gói app của người dùng thành bundle.
 
 ### R5-3. Production hardening
-- [ ] Mount rootfs Read-Only + tmpfs cho /tmp, /var/log (chống mòn eMMC).
+- [x] `--read-only`: bind rootfs read-only trong mount ns + tmpfs cho /tmp, /run, /dev/shm (bỏ qua path là symlink như /var/log -> ../tmp). Kernel từ chối read-only bind trên tmpfs -> báo lỗi rõ, không im lặng. (8 case)
 - [x] Lệnh `minicontainer service create` sinh systemd unit (tự restart khi crash, 0 daemon).
 - [x] `--net=bridge`: `mcbr0` + veth pair, IP riêng 10.88/16, không slirp, không daemon. (2026-10-29: 2 container ping nhau, HTTP client/server cross-container)
 - [x] `exec <id> <cmd>` vào container đang chạy bằng `setns` (không cần nsenter).
@@ -45,8 +45,8 @@ Khắc phục các F1–F9 trong báo cáo tiến độ, chia 5 đợt R1–R5 (
 - [x] Health check `--health-cmd` định kỳ (host-run mỗi 5s, foreground + detached, marker `health_failed`).
 
 ### R5-4. Release gate mở rộng
-- [ ] Test trên 4 arch (QEMU hoặc board thật).
-- [ ] Soak 24h cho profile IoT. (🟡 smoke 200 vòng/146s: 0 lỗi, 0 leak)
+- [x] Test trên 4 arch: aarch64 trên box thật; x86_64 native; armv7l/riscv64 chạy `--version` dưới qemu-user (chưa có board thật cho 3 arch sau).
+- [ ] Soak 24h cho profile IoT. (🟡 data dài nhất: 800 vòng/588s 0 lỗi 0 leak; cộng thêm smoke 12 vòng có cycle `--read-only`. Lệnh chạy: `ITER=117000 bash soak.sh` — Khánh chạy riêng lúc khác)
 - [x] README + LICENSE (Apache-2.0/MIT) + CHANGELOG đầy đủ.
 
 ## Tiêu chí đóng PLAN-4

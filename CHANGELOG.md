@@ -1,5 +1,43 @@
 # CHANGELOG — minicontainer
 
+## [1.4.0] - 2026-10-29
+
+### Added
+- **`--read-only`** (`ns.c: ro_setup()`): protects the µSD/eMMC card from wear.
+  The child bind-mounts the rootfs onto itself inside its private mount
+  namespace, mounts `tmpfs` on `/tmp` (32M), `/run` (8M) and `/dev/shm` (64M),
+  and after `chroot` + `/proc` remounts that bind read-only, so writes to
+  `/etc`, `/usr`, `/opt` fail with `EROFS` while the host's copy stays
+  writable. Distributions that redirect `/var/log -> ../tmp` (Buildroot) are
+  detected with `lstat` per path component and skipped — mounting onto a
+  symlink shadows `/tmp` with a second tmpfs.
+- **`pull <profile>`** (`build/src/pull.c`): fetches `<profile>-rootfs.tar.gz`
+  with `curl`, `wget` or a local path (`--url=BASE`, or `MC_PULL_URL`), aborts
+  when the destination filesystem has less than 4× the archive size free,
+  verifies `--sha256` when given, rejects archives with absolute or `..`
+  members, extracts into a staging dir and renames it into place (`--force`
+  to replace an existing root, old copy removed only after success). Tools are
+  launched with `execvp` and a literal argv, so `MC_PULL_URL` cannot inject a
+  command. Warns when the destination is on tmpfs, where `--read-only` cannot
+  work.
+- `soak.sh` gained a `--read-only` cycle (6 cycle kinds now).
+- Release artifacts of v1.3.0 (aarch64/armv7l/x86_64/riscv64 + `SHA256SUMS.txt`
+  + `test.sh`) were downloaded from the tagged GitHub release: checksums
+  verified, all four binaries report `minicontainer 1.3.0`, and the aarch64
+  asset passed the full suite on the S905W box.
+
+### Fixed
+- `--read-only` now fails with an explicit message on a rootfs under `/tmp`:
+  the kernel returns `EPERM` for a read-only bind remount of tmpfs, and a
+  silent writable rootfs would be worse than an error.
+
+### Verified
+- **74/74 PASS** on the TV Box (8 read-only cases, 11 pull cases), binary
+  136,712 B aarch64 musl static, zero compiler warnings with both the musl
+  cross toolchain and glibc `gcc -static -Wall`.
+- 12-iteration soak with the read-only cycle: 0 errors, 0 leaks. The 24 h soak
+  is left for a separate run (`ITER=117000 bash soak.sh`).
+
 ## [1.3.0] - 2026-10-29
 
 ### Added

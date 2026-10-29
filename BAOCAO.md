@@ -1,8 +1,10 @@
 # BAOCAO.md — Báo cáo tổng hợp: Hệ thống quản lý container siêu nhẹ trên TV Box
 
 Đề tài môn Hệ điều hành — Amlogic S905W (4×Cortex-A53 @1.2GHz, 1.8GB RAM, eMMC 12GB, kernel 6.18.38-meson64).
-Sản phẩm: `minicontainer` **95,752 B** static + rootfs Buildroot **1.3MB**. Zero-daemon, 6 namespaces, 5 controllers cgroup v2,
-seccomp 21 syscall, CLI `run/ps/stats/stop/rm/oci-run`. Test: **21/21 PASS**.
+Sản phẩm (v1.4.0): `minicontainer` **136,712 B** musl static, ~2.200 dòng C / 14 module + 4 rootfs profile (**1.3 MB → 22.2 MB**).
+Zero-daemon, 6 namespaces, 5 controllers cgroup v2, seccomp 21 syscall,
+CLI `run/ps/stats/stop/rm/exec/oci-run/service/pull`, `--net=bridge`, `--read-only`, CI 4 kiến trúc + release theo tag.
+Test: **74/74 PASS** trên box thật (2026-10-29).
 
 ---
 
@@ -18,7 +20,7 @@ seccomp 21 syscall, CLI `run/ps/stats/stop/rm/oci-run`. Test: **21/21 PASS**.
 ### 1.2. Sơ đồ tổng thể
 
 ```
-[laptop build] --cross compile--> minicontainer (95KB, aarch64 musl static)
+[laptop build] --cross compile--> minicontainer (137KB, aarch64 musl static)
        | scp
        v
 [TV Box /opt/rootfs]  <-- pivot_root --  container process (UID 0 trong, nobody ngoài)
@@ -29,18 +31,24 @@ seccomp 21 syscall, CLI `run/ps/stats/stop/rm/oci-run`. Test: **21/21 PASS**.
        |
        +-- cgroup v2: /sys/fs/cgroup/minicontainer-<pid>-<n>
              memory.max / cpu.max / pids.max / io.max  + cgroup.procs
+       +-- netns bridge: mcbr0 10.88.0.1/16 + veth mcv<pid>/mcc<pid>
 ```
 
-### 1.3. Các thành phần (10 module, 1 binary)
+### 1.3. Các thành phần (14 module, 1 binary)
 
 | Module | Trách nhiệm |
 |---|---|
 | `common` | die/parse_bytes/file I/O, struct cfg |
 | `seccomp` | BPF deny-list 21 syscall |
-| `ns` | clone child, pivot_root, userns map, mount make-private |
+| `ns` | clone child, chroot, userns map, mount make-private, tạo `/dev`, `--read-only` |
 | `cgroup` | setup/attach/cleanup v2 |
 | `run` | điều phối clone → map → go → detach/wait |
 | `state` | ps/stats/stop/rm (không daemon) |
+| `exec` | `setns()` vào container đang chạy (user→net/mnt→pid), seccomp + cgroup kế thừa |
+| `bridge` | `mcbr0` + veth, đặt tên/IP/route bằng ioctl trong netns, bring-up `lo` |
+| `disk` | quota userspace (nftw) + watchdog health `--health-cmd` |
+| `pull` | tải profile (curl/wget/local), check dung lượng, verify sha256, chặn tar độc hại |
+| `systemd` | sinh unit `service create` (restart khi crash, vẫn zero-daemon) |
 | `cli` | parse flags (2 dạng) |
 | `oci` | bundle mode subset |
 | `main` | dispatch |
@@ -159,6 +167,10 @@ Systemd để mount propagation mặc định `shared` → mount trong container
 | 14 | P2-10: test.sh | 21/21 xanh |
 | 15 | P2-9: OCI mode | Bundle đọc được, limit từ JSON |
 | 16 | Dọn rác + tách module | 10 module, Makefile, 21/21 |
+| 17 | Đợt R1–R2 (PLAN-4) | `--json` cho ps/stats, `--timeout`, disk quota userspace `--disk`, Ctrl-C foreground |
+| 18 | Đợt R3–R4 (PLAN-4) | seccomp theo kiến trúc, `stop/rm` dùng `cgroup.kill`, `--version`, README/CHANGELOG, release tarball |
+| 19 | Đợt R5 a (v1.2–v1.3) | health check detached, `/dev` trong container, `exec` (setns), `--net=bridge`, 4 profile build thật, CI 4 arch + release tag |
+| 20 | Đợt R5 b (v1.4) | `--read-only` chống mòn eMMC + tmpfs, `pull <profile>`, 74/74 test, verify asset release trên box thật |
 
 ---
 
@@ -166,50 +178,53 @@ Systemd để mount propagation mặc định `shared` → mount trong container
 
 | Runtime | Ngôn ngữ | Daemon nền | Idle RAM | Start 1 container | Chuẩn |
 |---|---|---|---|---|---|
-| **minicontainer** | C (musl), 95KB | không có (0MB) | **0MB** | **0.010–0.063s** | rootfs là thư mục |
+| **minicontainer v1.4.0** | C (musl), 137KB | không có (0MB) | **0MB** | **0.010–0.065s** | rootfs là thư mục + tar profile |
 | Docker (trên box) | Go | dockerd+containerd | **207MB** | **2.076s** | OCI |
 | crun | C | cần stack trên | ~KBs | ~47ms create→delete | OCI full |
 | runc | Go | cần stack trên | ~MBs | ~224ms | OCI full |
 | youki | Rust | cần stack trên | thấp | ~111ms | OCI full |
 | gVisor/Kata | sandbox/VM | nặng | lớn | penalty 40–60% TPS | OCI, cách ly mạnh |
 
-**Kết luận**: nhanh hơn Docker trên cùng box **~33–207 lần**, nhẹ hơn nền **vô hạn lần** (207MB → 0MB), tiệm cận crun dù code chỉ ~600 dòng C. Không cạnh tranh OCI (không chạy image Docker/k8s) — đó là đánh đổi chủ đích.
+**Kết luận**: nhanh hơn Docker trên cùng box **~33–207 lần**, nhẹ hơn nền **vô hạn lần** (207MB → 0MB), tiệm cận crun dù code chỉ ~2.200 dòng C. Không cạnh tranh OCI (không chạy image Docker/k8s) — đó là đánh đổi chủ đích.
 
 ---
 
 ## 6. Điểm mạnh
 
 1. **Zero-daemon đo được**: 0 process + 0MB khi idle; Docker tốn 207MB trên cùng box.
-2. **Boot 30–63ms**, nhanh hơn `docker run` cùng box 33–207 lần.
-3. **Rootfs tự build 1.3MB** (nhỏ hơn Alpine 6.5 lần) — tự làm cả "khách" lẫn "chủ".
+2. **Boot 30–65ms**, nhanh hơn `docker run` cùng box 33–207 lần.
+3. **4 rootfs profile tự build** (base-mini 1.3 MB → python-edge 22.2 MB), phân phối bằng `minicontainer pull` (sha256 + kiểm tra dung lượng + chặn tar độc hại).
 4. **Cgroup v2 hard limit thật**: OOM-killer giết đúng ngưỡng 30MB, CPU cap đúng 20%, fork-bomb bị chặn ở 16.
 5. **Chạy được trên kernel mod sơ sài** nơi Podman còn không cài nổi (không dbus/systemd/slirp).
 6. **Nhiệt full-load 1 core chỉ +2°C** (52→54°C) — an toàn 24/7 không tản nhiệt chủ động.
 7. **3 lớp phòng thủ xếp chồng**: pivot_root + userns (nobody) + seccomp 21 syscall.
-8. **Binary 95KB** — nhẹ hơn dockerd ~1300 lần.
-9. **Test tự động 21/21**, mount leak = 0 qua nhiều lần chạy.
+8. **Binary 137KB** — nhẹ hơn dockerd ~950 lần; CI cross-compile 4 kiến trúc, release theo tag kèm `SHA256SUMS.txt`.
+9. **Test tự động 74/74** (trước đó 21→39→55), mount leak = 0, cgroup/state/veth = 0 sau mỗi lần chạy; soak 800 vòng liên tục 0 lỗi.
 10. **OCI-bundle mode** đọc được bundle chuẩn (args/hostname/rootfs/limits verified).
+11. **Cách ly thật sự giữa container**: `exec` vào container đang chạy (PID≠1, uid 0, seccomp + cgroup kế thừa), `--net=bridge` để 2 container tự thấy nhau (HTTP 200 lighttpd↔python, MQTT pub/sub 3 container qua `mcbr0`).
+12. **Chống mòn thẻ nhớ**: `--read-only` đóng băng rootfs, mọi ghi rơi vào tmpfs (`/tmp`, `/run`, `/dev/shm`).
 
 ---
 
 ## 7. Điểm yếu (trung thực)
 
 ### Cố hữu (by design, có lập luận)
-- Không image/registry/layers; không mạng ảo; không daemon → không restart-policy/logs/exec; deny-list không phải allow-list; single-arch; không `/sys`; không volumes.
+- Không registry/image format (tarball profile tự build là thay thế gần nhất); không NAT/DNS cho `--net=bridge` (container ra LAN cần host route 10.88/16); không log driver (stdout vào `/run/minicontainer/<id>/log`); deny-list không phải allow-list; không `/sys`; không volumes/bind-mount; chưa có `mc-sdk` đóng gói app; board thật mới có aarch64 (armv7l/riscv64/x86_64 mới verify bằng QEMU).
 
-### Khắc phục được (PLAN-3)
-- F1: Ctrl-C foreground để lại con mồ côi + cgroup rác (chưa sửa).
-- F2: `io.max` chỉ bóp tốc độ, chưa quota dung lượng đĩa.
-- F3: validate đầu vào còn thiếu.
-- F4: test.sh chưa phủ `--cpu`/`--io` tự động, T5/reboot manual.
-- F5: output chỉ cho người đọc (chưa `--json`).
-- F6: timeout stop cứng 3s.
-- F7: chưa có man/README/CHANGELOG/`--version`.
-- F8: OCI subset im lặng bỏ qua mounts/hooks.
-- F9: tên cgroup/state không chống PID-reuse tuyệt đối (thực tế an toàn vì `/run` là tmpfs).
+### Đã khắc phục trong PLAN-3/PLAN-4 (đều có test)
+- F1 Ctrl-C để lại con mồ côi → forward tín hiệu + `cgroup.kill`.
+- F2 chưa quota dung lượng → `--disk` watchdog userspace (1s) + `RLIMIT_FSIZE`.
+- F3 validate đầu vào → `--ram=abc`, `--net=routable`, tên lạ bị từ chối.
+- F4 phủ `--cpu`/`--io` tự động → có trong `test.sh` (T5-auto, Tio-auto).
+- F5 → `ps --json`, `stats --json` (state rỗng là `[]`).
+- F6 → `stop --timeout N`.
+- F7 → `--version` theo arch/libc + README + CHANGELOG.
+- F8 → `oci-run` cảnh báo key ngoài subset.
+- F9 → tên cgroup/state kèm PID, `stop`/`rm` retry rmdir + marker `.oldroot`.
+- Không có `exec`/mạng → thêm `exec` (setns), `--net=isolated|bridge`, `lo` tự UP, `/dev` tự tạo, `--read-only`, `pull`.
 
 ---
 
 ## 8. Kết luận
 
-Hệ thống **đạt mục tiêu đề tài**: tự gọi syscall Linux (clone/chroot/pivot/mount/sethostname/execvp/waitpid) để xây container siêu nhẹ, áp dụng đúng lý thuyết môn Hệ điều hành (Process Management, Memory Management, File System, Namespaces, Cgroups), chạy được trên phần cứng hạn chế, zero-daemon, có số liệu đo đạc thật và test tự động. 16 phase thực hiện, mỗi phase có khảo sát → can thiệp → đánh giá → ghi lại. Tổng artifact: 19 file markdown + 10 module C + Makefile + test.sh.
+Hệ thống **đạt mục tiêu đề tài**: tự gọi syscall Linux (clone/chroot/pivot/mount/sethostname/execvp/waitpid) để xây container siêu nhẹ, áp dụng đúng lý thuyết môn Hệ điều hành (Process Management, Memory Management, File System, Namespaces, Cgroups), chạy được trên phần cứng hạn chế, zero-daemon, có số liệu đo đạc thật và test tự động. 16 phase thực hiện, mỗi phase có khảo sát → can thiệp → đánh giá → ghi lại. Tổng artifact: ~20 file markdown + 14 module C (2.209 dòng) + Makefile + `test.sh` (74 case) + `soak.sh` + `bench.sh` + `release.sh` + 4 defconfig profile + CI 4 kiến trúc.

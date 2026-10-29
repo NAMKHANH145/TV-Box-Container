@@ -241,3 +241,70 @@ them case `lo` -> 55). Mot lan FAIL "health detached: cgroup da don" la do
 
 Remaining: 24h soak (T3) — chạy `HOUR=24 bash soak.sh`; xác nhận release job
 theo tag; riscv64 chưa chạy thử.
+
+## Update — v1.4.0 read-only rootfs + `pull` verified (2026-10-29)
+
+### Release artifact từ GitHub (R5-1/B2)
+Tag `v1.3.0` đẩy lên `NAMKHANH145/TV-Box-Container` → run `40851398981`
+(build 4 arch + release job) **xanh**. Tải `gh release download v1.3.0`:
+
+| Asset | Kích thước | Checksum | Chạy được |
+|---|---|---|---|
+| minicontainer-linux-aarch64 | 729,416 B (glibc static) | SHA256SUMS.txt OK | **trên box thật**, `test.sh` từ chính release: **55/55 PASS** |
+| minicontainer-linux-x86_64 | 931,880 B | OK | native `--version` |
+| minicontainer-linux-armv7l | 443,828 B | OK | `qemu-arm-static -L /usr/arm-linux-gnueabihf` |
+| minicontainer-linux-riscv64 | 622,848 B | OK | `qemu-riscv64-static -L /usr/riscv64-linux-gnu` |
+
+`test.sh` trong asset trùng bản đang dùng (13,955 B). Lưu ý: asset tải về
+mất bit `+x` → phải `chmod +x` (đúng như PLAN-4 ghi).
+
+### `--read-only` (R5-3)
+| Kiểm chứng | Kết quả |
+|---|---|
+| `echo x > /etc/mcro` trong container | `Read-only file system`, file không tồn tại |
+| `/tmp` `tmpfs` 32M, `/run` 8M, `/dev/shm` 64M trong `/proc/mounts` | đủ 3, `rw` |
+| `echo ok > /var/log/mcro` (Buildroot `/var/log -> ../tmp`) | OK, **không** mount đè lên `/tmp` |
+| Số dòng ` /tmp tmpfs ` trong mounts | 1 (trước khi sửa là 2 — mount `/var/log` đi theo symlink) |
+| `/dev/null`, `/proc/1/cmdline`, `/etc/passwd` | đọc/ghi bình thường, `rc=0` |
+| `/opt/rootfs` trên **host** sau khi container thoát | ghi được (`hostprobe`), 0 mount leak |
+| Rootfs đặt trong `/tmp` (tmpfs) | `remount rootfs read-only: Operation not permitted` + hướng dẫn chuyển ra ext4 — **fail loudly**, không im lặng cho ghi |
+
+### `pull <profile>` (R5-2)
+| Case | Kết quả |
+|---|---|
+| `pull base-mini --url=<dir local> --dest=…` | exit 0, `bin/hello` giữ quyền `+x` |
+| `--dest` đã tồn tại, không `--force` | từ chối, exit 1 |
+| `--force` | ghi đè thành công |
+| `--sha256` đúng | `pull: sha256 khop`, exit 0 |
+| `--sha256` sai | in mong đợi/thực tế, exit 1, **không** giải nén |
+| tar có thành viên tuyệt đối (`tar -czPf /etc/hostname`) | `tu choi giai nen`, dest không bị tạo |
+| còn file staging `.mc-pull-*` sau run | không |
+| `pull web-proxy --url=/root/mcpull --dest=/opt/mcpull-wp` (ảnh thật 1.4 MB → 2.9 MB) | exit 0; `run --rootfs` OK (`/dev/null` tự tạo); `--read-only` OK |
+| `MC_PULL_URL` chưa đặt, không `--url` | báo lỗi hướng dẫn, exit 1 |
+
+Test gate v1.4.0: **74/74 PASS** trên box (`build/test.sh`, binary 136,712 B
+musl static). Build sạch warning với **cả** toolchain musl-cross và
+`gcc -static -O2 -Wall` (glibc, giống CI).
+
+### Soak
+`ITER=12 bash soak.sh` sau khi thêm cycle `--read-only`: 12 vòng / 7s,
+`loi=0 lan-leak=0`, MemAvailable giảm 4 kB. **Soak 24h chủ động dừng theo yêu
+cầu**, để chạy riêng: `ITER=117000 bash soak.sh` (~24h ở 1.36 vòng/giây đo
+trên box; `HOUR=24` hiện đặt ITER=72000 ≈ 15h — dùng `ITER=` nếu muốn đúng 24h).
+Dữ liệu soak dài nhất đã có: 800 vòng liên tục / 588s, 0 lỗi 0 leak.
+
+### Dọn dẹp (yêu cầu của Khánh)
+- Laptop: `/home/namkhanh/TV-Box` **7.4 GB → 808 MB**. xoá
+  `build/buildroot/output/build` (6.6 GB thư mục biên dịch từng package, tái
+  tạo được từ `dl/`), `build/release/` (staging v1.0.0 cũ),
+  `build/minicontainer-1.0.0-linux-aarch64.tar.gz`, `build/oci-test/rootfs/`,
+  `build/rootfs-buildroot/` (không còn chỗ nào tham chiếu). **Giữ lại**
+  `buildroot/output/host` (toolchain musl mà `make` dùng — đã build lại
+  thành công sau dọn) và `buildroot/dl` (416 MB, để build profile về sau
+  không cần tải lại). Ổ đĩa 96 % → 94 % (20 GB trống).
+- TV Box: `/tmp` **~20 MB → 32 KB** (script/log thử nghiệm, binary cũ), 3 ảnh
+  profile chuyển về `/root/mcpull/` làm nguồn `pull`, xoá `/opt/test.sh`,
+  `/root/test.sh`, `/usr/local/bin/minicontainer.1.0.0.bak`, `/opt/wp-ext4`;
+  `apt-get clean` + `rm -rf /var/lib/apt/lists/*` + journal vacuum 20M →
+  `/var` 701 MB → 333 MB. Disk 27 % → 23 % (8.1 GB trống). Không đụng
+  `/root/hass`, `vendor-aml-uboot-backup.img`, `aml-*.sh`, `/opt/containerd`.

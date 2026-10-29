@@ -6,7 +6,7 @@
 
 | Khía cạnh | minicontainer | Docker |
 |-----------|--------------|--------|
-| Binary size | ~122KB static (v1.3.0) | dockerd ~131MB + containerd ~77MB |
+| Binary size | ~137KB static (v1.4.0) | dockerd ~131MB + containerd ~77MB |
 | RAM idle | 0MB (zero-daemon) | ~207MB |
 | Start latency | 51-68ms | 2.076s |
 | Rootfs size | 1.3MB (Buildroot) | 8.5MB+ (Alpine) |
@@ -36,15 +36,15 @@ make deploy BOX=<IP_BOX> SSHPASS=<password>
 
 ### Run tests
 ```bash
-bash test.sh   # on device, 50 test cases
-ITER=200 bash soak.sh   # repeat-run leak check (default 100 iterations)
+bash test.sh   # on device, 74 test cases
+ITER=117000 bash soak.sh   # ~24h leak/latency soak (default 100 iterations)
 ```
 
 ## Commands
 
 ```bash
 # Run container (foreground)
-minicontainer run --ram 30M --cpu 20 --pids 64 [--io 1M] [--disk 100M] [--net host|isolated|bridge] [--rootfs DIR] [--hostname NAME] [--health-cmd CMD] <cmd> [args...]
+minicontainer run --ram 30M --cpu 20 --pids 64 [--io 1M] [--disk 100M] [--net host|isolated|bridge] [--rootfs DIR] [--hostname NAME] [--health-cmd CMD] [--read-only] <cmd> [args...]
 
 # Run detached
 minicontainer run -d --name ID --ram 30M --cpu 20 /bin/sleep 60
@@ -72,6 +72,9 @@ minicontainer oci-run <bundle-dir>
 
 # systemd service generator (restart on crash, still zero daemon)
 minicontainer service create <name> <cmd> [args...]
+
+# Fetch a rootfs profile (curl/wget/local path) into /opt/rootfs-<profile>
+minicontainer pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] [--force]
 
 # Version
 minicontainer --version
@@ -104,7 +107,7 @@ dependency.
 | Mode | Effect |
 |------|--------|
 | `host` (default) | no `CLONE_NEWNET`; shares host connectivity |
-| `isolated` | new empty netns, only `lo` down — no external reach |
+| `isolated` | new empty netns; only `lo` (brought up, so loopback services work) — no external reach |
 | `bridge` | new netns with `eth0` on the shared `mcbr0` bridge (10.88.0.1/16) |
 
 `bridge` creates a veth pair named `mcv<pid>`/`mcc<pid>`, moves the container
@@ -117,6 +120,42 @@ the 10.88/16 subnet; they talk to each other and to 10.88.0.1 directly. The
 host veth disappears with the container netns. If `ip` is missing or the
 kernel lacks `veth`/`bridge`, the run fails with an explicit error rather
 than silently falling back.
+
+### Read-only rootfs (`--read-only`)
+
+TV Boxes boot from a µSD/eMMC card that wears out on repeated small writes, so
+`--read-only` freezes the rootfs and sends all writes to RAM:
+
+- the rootfs is bind-mounted onto itself inside the container's private mount
+  namespace (MS_REC|MS_PRIVATE first, so nothing propagates back to the host)
+  and that bind is remounted `ro` after `/proc` is mounted
+- `tmpfs` goes on `/tmp` (32M), `/run` (8M) and `/dev/shm` (64M)
+- a path the distribution redirects with a symlink (`/var/log -> ../tmp`) is
+  skipped, not re-mounted: mounting onto a symlink would shadow `/tmp` with a
+  second tmpfs. Its target is already tmpfs.
+
+Writes to `/etc`, `/usr`, `/opt` inside the container then fail with `EROFS`
+while the host's copy of the rootfs stays writable. Kernel 6.18 refuses a
+read-only bind remount of a tmpfs (`EPERM`), so a rootfs that lives under
+`/tmp` fails loudly instead of silently staying writable — keep profiles on
+ext4 (e.g. `/opt/rootfs-<profile>`).
+
+### Rootfs profiles (`pull`)
+
+```bash
+minicontainer pull web-proxy --url=https://images.example.com/rootfs   # http(s)
+minicontainer pull iot-gateway --url=/root/mcpull --dest=/opt/rootfs-iot
+minicontainer run --rootfs /opt/rootfs-web-proxy --net=bridge --read-only /usr/sbin/lighttpd -f /etc/lighttpd.conf
+```
+
+`pull` fetches `<profile>-rootfs.tar.gz` with `curl` (or `wget`, or a plain
+local path), refuses the download if the destination filesystem lacks ~4× the
+archive size, verifies `--sha256` when given, rejects archives containing
+absolute or `..` members, extracts into a staging directory and renames it
+into place (an existing destination is only replaced with `--force`). External
+tools are started with `execvp` and a literal argv, so a URL from
+`MC_PULL_URL` cannot inject shell commands. Archives are built by
+`profiles/build.sh`; see [`profiles/README.md`](profiles/README.md).
 
 ### Exec / health interplay
 
@@ -172,13 +211,13 @@ container should use `exec` from a wrapper service instead.
 ```
 build/
 ├── Makefile          # make, make tools, make deploy, make clean
-├── test.sh           # 50 test cases
-├── soak.sh           # leak/memory check over repeated runs
+├── test.sh           # 74 test cases
+├── soak.sh           # leak/memory check over repeated runs (~24h with ITER=117000)
 ├── bench.sh          # latency & resource benchmark
 ├── release.sh        # staged tarball + SHA256SUMS (version read from src/main.c)
-├── src/              # 13 C modules + common.h
+├── src/              # 14 C modules + common.h
 │                     # (main, cli, common, ns, run, exec, bridge, cgroup,
-│                     #  disk, seccomp, state, oci, systemd)
+│                     #  disk, seccomp, state, oci, systemd, pull)
 ├── buildroot/        # Buildroot source for building rootfs (gitignored)
 ├── oci-test/         # Sample OCI bundle
 └── tvbox_defconfig   # Buildroot defconfig for rootfs
@@ -208,8 +247,13 @@ profiles/             # 4 rootfs profiles + build.sh + README
 - `exec` needs the container's PID still alive and read access to
   `/proc/<pid>/ns/*`; it does not copy env or working directory from the
   caller
-- Multi-arch binaries are built from portable seccomp (`__NR_*`) but CI has not
-  been exercised on armv7l/riscv64 hardware
+- `--read-only` needs the rootfs on a real filesystem: the kernel rejects a
+  read-only bind remount of tmpfs, so `--rootfs` under `/tmp` errors out
+- `pull` does not verify a signature or a pinned key — pass `--sha256` for
+  content you did not build yourself; no NAT/DNS for pulled profiles either
+- Multi-arch binaries are built from portable seccomp (`__NR_*`); the tagged
+  CI release publishes all four and they run (x86_64 native, armv7l/riscv64/
+  aarch64 under qemu-user), but only aarch64 has been tested on real hardware
 
 ## License
 
