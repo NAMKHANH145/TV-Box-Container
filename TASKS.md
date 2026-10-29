@@ -21,7 +21,7 @@ Tài liệu này trả lời 3 câu hỏi: **dự án có những module nào**,
 | `/dev` trong container | ✅ tmpfs + bind node (rootfs động không có `/dev/null`) |
 | Health check chế độ `-d` | ✅ Watchdog dùng chung với `--disk`, marker `health_failed` |
 | Rootfs profiles (4 bản) | ✅ Cả 4 build + chạy thật trên box: base-mini 1.3 MB, web-proxy 2.6 MB, iot-gateway 14.1 MB, python-edge 22.2 MB |
-| CI GitHub Actions | ✅ 4/4 arch xanh; release theo tag `v1.3.0` (run `40851398981`) kèm `SHA256SUMS.txt` — tải asset về verify, bản aarch64 chạy `test.sh` **55/55** trên box |
+| CI GitHub Actions | ✅ 4/4 arch xanh; asset build bằng **musl** qua Docker `muslcc/x86_64` → 100.704–125.392 B, có check fail nếu binary >200 KB (run `40857971212`). Release `v1.3.0` (run `40851398981`) vẫn là asset glibc 443.828–931.880 B |
 | `--read-only` rootfs | ✅ Bind ro + tmpfs `/tmp`,`/run`,`/dev/shm`; bỏ qua symlink `/var/log`; fail rõ nếu rootfs ở tmpfs |
 | `pull <profile>` | ✅ curl/wget/local path, check dung lượng, `--sha256`, chặn tar độc hại, rename atomic |
 | Soak test 24h | 🟡 Dữ liệu dài nhất 800 vòng/588s: 0 lỗi, 0 leak; smoke 12 vòng có cycle `--read-only` OK. **24h để Khánh chạy riêng**: `ITER=117000 bash soak.sh` |
@@ -165,3 +165,32 @@ R1-1 signal forwarding · R1-2 validate input · R1-3 cảnh báo OCI · R2-1 di
 - Thêm daemon/agent — phá vỡ thiết kế zero-daemon.
 - Hỗ trợ đầy đủ OCI runtime spec — chỉ cần subset đang dùng.
 - `--net=bridge` bản đầy đủ (NAT, port mapping) — làm bản tối thiểu trước, đo nhu cầu sau.
+
+---
+
+## 8. Handoff — dừng tại đây (2026-10-29, hết phiên)
+
+Toàn bộ process nền đã dừng: không còn soak/bench/test chạy trên laptop lẫn box;
+`gh run watch` cũng đã kết thúc. Không có commit treo ở local — mọi thứ mục này
+mô tả đều đã push lên `main`.
+
+### Đã xong trong phiên này (verify được, không còn TODO)
+- Docs đồng bộ v1.4.0 (`README/CHANGELOG/VERIFICATION_LOG/PLAN-4/TASKS/BAOCAO/FINAL`) — commit `252e5e5`.
+- CI chuyển sang **musl** qua Docker `muslcc/x86_64:<target>` (commit `78f1f51`). Lý do không tải thẳng từ musl.cc: musl.cc chặn IP của GitHub runner. Run dispatch `40857971212` **xanh**, asset 4 arch:
+  aarch64 125.392 B · armv7l 112.360 B · riscv64 104.808 B · x86_64 100.704 B
+  (trước đây 443.828–931.880 B vì glibc static). Thêm step check: binary >200 KB ⇒ fail.
+  Note: image muslcc **không có `make`**, chỉ có `gcc`/`strip` — step CI gọi gcc trực tiếp với flag giống `build/Makefile` (`-static -O2 -Wall`).
+
+### Việc còn lại, theo thứ tự ưu tiên cho phiên sau
+1. **`v1.4.0` tag + release** — chưa tag, vì phát hành là thao tác shared state, cần Khánh quyết. Lệnh: `bash release.sh` (đọc version từ `src/main.c`) rồi tag `v1.4.0`; CI sẽ dựng asset musl ~125 KB + `SHA256SUMS.txt`. Sau đó tải asset aarch64 về box chạy `test.sh` để đóng R5-1 (như đã làm với `v1.3.0`).
+2. **Soak 24h** — Khánh chủ động chạy lúc khác: `ITER=117000 bash soak.sh` trên box (1.36 vòng/giây ⇒ ~24h; `HOUR=24` chỉ ra 72000 vòng ≈ 15h).
+3. **`mc-sdk init/pack`** (PLAN-4 R5-2 còn dở) — hướng làm đã chốt: `pack` tạo `<profile>-rootfs.tar.gz` đúng định dạng mà `pull` nhận (tar.gz, member tương đối, giữ quyền +x), `init` sinh skeleton. `pull` đã chặn tar độc hại nên `pack` chỉ cần đảm bảo member tương đối + không symlink vượt ra ngoài rootfs.
+4. **CI chạy `test.sh` thật trong CI** — cần self-hosted runner aarch64 trên box (chưa làm; phải đăng ký runner trên repo, thao tác shared state).
+5. **LICENSE** — README vẫn ghi "MIT or Apache-2.0 (to be decided)" ⇒ chưa có file LICENSE. Cần Khánh chọn.
+6. Nhỏ hơn: `--net=bridge` chưa NAT/DNS ra LAN; port <1024 không bind được trong container (thiếu `CAP_NET_BIND_SERVICE`).
+
+### Bối cảnh máy (để phiên sau không đoán lại)
+- Laptop `/home/namkhanh/TV-Box`: 808 MB (đã dọn từ 7.4 GB); `build/buildroot/output/host/bin` vẫn còn — đó là toolchain musl local mà `build/Makefile` mặc định dùng, **không được xoá**.
+- Box S905W: `/tmp` còn 32 KB, `/var` 333 MB, đĩa 23% — sạch sẽ, `--read-only`/`pull` đã test xong (74/74).
+- Kết nối box: `BOX=<IP> SSHPASS_FILE=<file>` (không hard-code IP/mật khẩu — xem `GUIDE.md`).
+- Ảnh muslcc đã cache sẵn trong Docker local (`aarch64`, `armv7l`, `riscv64`, `x86_64`), rebuild thử nghiệm mất ~10 s/arch.

@@ -28,6 +28,7 @@ Khắc phục các F1–F9 trong báo cáo tiến độ, chia 5 đợt R1–R5 (
 ### R5-1. Multi-arch Release (CI/CD)
 - [x] GitHub Actions cross-compile 4 arch: aarch64, armv7l, x86_64, riscv64. (run 40842042612, 2026-10-29)
 - [x] GitHub Releases tự động theo tag, naming `minicontainer-linux-<arch>` + `SHA256SUMS.txt` (tag `v1.3.0`, run 40851398981 xanh; tải asset về verify checksum, bản aarch64 chạy 55/55 test trên box).
+- [x] Asset release là musl static, không còn phình vì glibc: CI build bằng Docker `muslcc/x86_64:<target>` (musl.cc chặn IP runner), 100.704–125.392 B thay vì 443.828–931.880 B; step check fail nếu >200 KB. Run verify: 40857971212.
 - [ ] CI chạy `test.sh` trên box aarch64 trước khi release.
 
 ### R5-2. Rootfs Profiles & SDK

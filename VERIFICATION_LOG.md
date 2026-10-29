@@ -286,6 +286,24 @@ Test gate v1.4.0: **74/74 PASS** trên box (`build/test.sh`, binary 136,712 B
 musl static). Build sạch warning với **cả** toolchain musl-cross và
 `gcc -static -O2 -Wall` (glibc, giống CI).
 
+### CI: asset release chuyển sang musl (run `40857971212`, workflow_dispatch, xanh)
+Lý do: asset `v1.3.0` là **glibc static 443.828–931.880 B**, mâu thuẫn với con số
+~137 KB mà README quảng bá. musl.cc chặn IP của runner nên lấy toolchain qua
+Docker Hub `muslcc/x86_64:<target>`; image chỉ có `gcc`/`strip` (không có
+`make`) nên step CI gọi gcc trực tiếp với đúng flag của `build/Makefile`.
+
+| Arch | Image tag | Trước (glibc, `v1.3.0`) | Sau (musl) |
+|---|---|---:|---:|
+| aarch64 | `aarch64-linux-musl` | 729.416 B | **125.392 B** |
+| armv7l | `armv7l-linux-musleabihf` | 443.828 B | **112.360 B** |
+| riscv64 | `riscv64-linux-musl` | 622.848 B | **104.808 B** |
+| x86_64 | `x86_64-linux-musl` | 931.880 B | **100.704 B** |
+
+Cả 4 là `ELF ... static-pie linked, stripped`, 0 warning. Thêm gate chống hồi
+quy: step "Check binary is static and not bloated" fail nếu >200 KB. Chưa verify
+4 asset musl này trên phần cứng thật (mới aarch64 build local bằng toolchain
+Buildroot đã chạy `test.sh`);QEMU `qemu-*-static` là cách nhanh nhất nếu cần.
+
 ### Soak
 `ITER=12 bash soak.sh` sau khi thêm cycle `--read-only`: 12 vòng / 7s,
 `loi=0 lan-leak=0`, MemAvailable giảm 4 kB. **Soak 24h chủ động dừng theo yêu

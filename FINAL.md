@@ -40,8 +40,10 @@
 ## Remaining (không chặn release)
 - **Soak 24h** — Khánh chạy riêng lúc khác: `ITER=117000 bash soak.sh` trên box
   (`HOUR=24` chỉ ra 72000 vòng ≈ 15h vì tốc độ đo được 1.36 vòng/giây)
-- CI: thêm toolchain musl.cc + `actions/cache` để asset release nhẹ ~137 KB
-  (hiện glibc static 623–932 KB); self-hosted runner để chạy `test.sh` trong CI
+- **Chưa tag `v1.4.0`** — phát hành là quyết định của Khánh; CI đã sẵn: run
+  dispatch `40857971212` xanh với asset musl 100.704–125.392 B (thay asset
+  glibc 443.828–931.880 B của `v1.3.0`)
+- CI: self-hosted runner aarch64 để chạy `test.sh` trước khi release — chưa có
 - mc-sdk: chưa implement `init`/`pack`
 - C4: armv7l/riscv64/x86_64 mới verify bằng QEMU, chưa có phần cứng thật
 - LICENSE: README còn ghi "MIT or Apache-2.0 (to be decided)" → chưa có file

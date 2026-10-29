@@ -6,7 +6,7 @@
 
 | Khía cạnh | minicontainer | Docker |
 |-----------|--------------|--------|
-| Binary size | ~137KB static (v1.4.0) | dockerd ~131MB + containerd ~77MB |
+| Binary size | ~100-137KB static, musl (v1.4.0) | dockerd ~131MB + containerd ~77MB |
 | RAM idle | 0MB (zero-daemon) | ~207MB |
 | Start latency | 51-68ms | 2.076s |
 | Rootfs size | 1.3MB (Buildroot) | 8.5MB+ (Alpine) |

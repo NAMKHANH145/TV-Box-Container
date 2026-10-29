@@ -26,6 +26,16 @@
   verified, all four binaries report `minicontainer 1.3.0`, and the aarch64
   asset passed the full suite on the S905W box.
 
+### Changed
+- CI builds the release binaries with **musl** instead of glibc: the four
+  cross toolchains come from the `muslcc/x86_64` Docker images (musl.cc
+  blocks the IP ranges GitHub Actions runners use, so direct tarball downloads
+  are not an option). Assets drop from 443,828–931,880 B to 100,704–125,392 B
+  (aarch64 729,416 → 125,392; x86_64 931,880 → 100,704), and a
+  new CI step fails the build if any binary exceeds 200 KB, which is how a
+  glibc link would show up. Verified by workflow_dispatch run `40857971212`
+  (all four arches, static-pie, stripped).
+
 ### Fixed
 - `--read-only` now fails with an explicit message on a rootfs under `/tmp`:
   the kernel returns `EPERM` for a read-only bind remount of tmpfs, and a
