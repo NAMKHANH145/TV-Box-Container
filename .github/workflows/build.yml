@@ -25,6 +25,15 @@ jobs:
       - name: sdk init/pack (11 check, khong can root)
         run: bash build/smoke-sdk.sh
 
+  # Kiem tra tren phan cung that (TV Box S905W), khong the chay tren runner GitHub.
+  hardware-test:
+    runs-on: [self-hosted, linux, aarch64]
+    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    steps:
+      - uses: actions/checkout@v4
+      - name: Chay test.sh tren TV Box (84 case)
+        run: bash build/test.sh
+
   build:
     runs-on: ubuntu-24.04
     strategy:
