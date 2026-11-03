@@ -1,4 +1,4 @@
-# FINAL.md — Kiến trúc và kết quả minicontainer v1.5.1
+# FINAL.md — Kiến trúc và kết quả minicontainer v1.5.2
 
 Tài liệu này mô tả **toàn bộ hệ thống từ đầu đến cuối**: triết lý, bản đồ module, luồng syscall của
 một lần `run`, từng cơ chế kernel được dùng, các bẫy đã gặp, bằng chứng kiểm chứng trên phần cứng thật,

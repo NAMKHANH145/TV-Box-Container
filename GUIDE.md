@@ -28,7 +28,7 @@ ls /proc/self/ns                          # đủ 10 namespace
 minicontainer --version
 ```
 
-`minicontainer --version` in ra `minicontainer 1.5.1 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
+`minicontainer --version` in ra `minicontainer 1.5.2 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
 đó không phải bản chuẩn (bản chuẩn ~145 KB, glibc static thường 440–930 KB).
 
 ---
