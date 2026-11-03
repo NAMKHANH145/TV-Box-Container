@@ -44,7 +44,7 @@ Phụ thuộc hai chiều duy nhất là qua `common.h`.
 - **Không force-push**, không sửa git config, không `git add -A` (stage theo tên file).
 - Không commit binary, rootfs đã build, `build/buildroot/`, log (`.gitignore` đã có).
 - Không xoá `build/buildroot/output/host/bin` — đó là toolchain musl mà `build/Makefile` dùng mặc định.
-- Thao tác cần xác nhận trước: tag/release, đăng ký self-hosted runner, chọn LICENSE (shared state).
+- Thao tác cần xác nhận trước: tag/release (shared state). Self-hosted runner và LICENSE đã xong.
 
 ## 4. Vòng kiểm chứng (làm y như cũ, đừng đoán)
 
