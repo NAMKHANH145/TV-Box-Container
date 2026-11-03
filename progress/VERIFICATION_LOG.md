@@ -510,3 +510,37 @@ release 11 s). Asset:
 - `do_rm` coi zombie (`/proc/<pid>/stat` state `Z`) là đã chết → tránh `rm` thất bại khi container vừa
   bị `stop` (nguyên nhân leak soak trước đó).
 - Soak trước đó leak `cgroups=1 state=1` mỗi ~20 vòng → sau fix: 200/200 sạch.
+
+---
+
+## v1.5.1 — Soak 6000 vòng (2026-11-03, sau fix leak)
+
+Binary: `minicontainer 1.5.1 (aarch64, musl, static)`, box S905W.
+
+```
+soak: ITER=6000  start cgroups=0 mounts=0 state=0 MemAvailable=1418656kB
+  100/6000  elapsed=64s   MemAvailable=1418644kB  err=0 leak=0
+  200/6000  elapsed=130s  MemAvailable=1416756kB  err=0 leak=0
+  ...
+  800/6000  elapsed=522s  MemAvailable=1423200kB  err=0 leak=0   <- vung leak cu (740-760) da qua sach
+  900/6000  elapsed=589s  MemAvailable=1423780kB  err=0 leak=0
+ 1000/6000  elapsed=652s  MemAvailable=1419052kB  err=0 leak=0
+  ...
+ 6000/6000  elapsed=3927s MemAvailable=1419828kB  err=0 leak=0
+soak xong: 6000 vong, elapsed=3927s, loi=0, lan-leak=0
+  cuoi: cgroups=0 mounts=0 state=0 MemAvailable=1419828kB (giam -102kB)
+SOAK OK
+```
+
+Kết quả: **6000/6000 vòng, err=0, leak=0, SOAK OK**. Vùng leak trước đây (740–760) đã qua sạch. MemAvailable giảm 102 kB sau 3927 s (~0,007 %/vòng) — không có leak bộ nhớ.
+
+### So sánh trước/sau fix
+
+| | Trước fix (binary cũ) | Sau fix (v1.5.1) |
+|---|---|---|
+| Leak bắt đầu | vong ~740 | không có |
+| Leak cuối (6000 vong) | cgroups=5, state=5 (tích lũy) | cgroups=0, state=0 |
+| err | 0 | 0 |
+| Kết luận | LEAK | SOAK OK |
+
+Nguyên nhân fix: `do_rm` thêm unlink `publish` + coi zombie là đã chết (tránh `rm` thất bại khi container vừa bị `stop`).

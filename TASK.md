@@ -195,7 +195,7 @@ CI musl + 74 test (v1.4.0).
 
 | # | Việc | Track | Ghi chú |
 |---|---|---|---|
-| 1 | Soak 24 h | C | `ITER=117000 bash build/soak.sh` (1.36 vòng/s) — ghi số vào `progress/VERIFICATION_LOG.md` |
+| 1 | Soak 6000 vòng (~1.1 h) | C | ✅ 6000/6000, err=0, leak=0, SOAK OK (2026-11-03). 24 h aspirational chưa chạy |
 | 2 | Tag + phát hành `v1.5.0` | B | ✅ released 2026-11-03 (CI run 41657038848, 4 asset musl + smoke-sdk.sh + test.sh) |
 | 3 | Verify 4 asset musl trên phần cứng thật | C | mới aarch64 build local; qemu cho 3 arch còn lại |
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |

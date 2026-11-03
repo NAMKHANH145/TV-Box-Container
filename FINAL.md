@@ -436,18 +436,47 @@ dù chỉ ~2.200 dòng C. Không cạnh tranh OCI đầy đủ (không chạy im
 **Theo thiết kế:**
 
 - Không registry/layer/overlay; không image format chuẩn (profile tar là thay thế gần nhất).
-- `--net=bridge` không NAT/DNS/port-mapping → container chỉ tới subnet 10.88/16.
+- ~~`--net=bridge` không NAT/DNS/port-mapping~~ → **đã có** v1.5.1: masquerade + DNS mặc định + `--publish`/`-p` (DNAT TCP). Còn thiếu: UDP publish, IPv6.
 - Không bind port < 1024 trong container.
-- Deny-list seccomp (không phải allow-list); không `/sys` (kernel cấm sysfs trong userns).
+- Deny-list seccomp (không phải allow-list) — xem §11.1; không `/sys` (kernel cấm sysfs trong userns).
 - Không volumes/bind-mount tuỳ ý, không log driver (stdout → state dir khi `-d`).
 - Không checkpoint/restore, không live-migrate, không SELinux/AppArmor.
 - `--disk` là watchdog 1 s, không phải quota kernel.
 - `sdk` là công cụ đóng gói, **không** phải thư viện nhúng (không có API C cho app khác).
-- Board thật mới có aarch64; 3 arch còn lại mới verify bằng QEMU-user.
+- Board thật mới có aarch64; 3 arch còn lại verify bằng QEMU-user + smoke-sdk 11/11 (xem §8.3).
 
 **Đã khắc phục (đều có test):** Ctrl-C để lại con mồ côi → forward tín hiệu + `cgroup.kill`;
 thiếu quota → `--disk` + `RLIMIT_FSIZE`; validate đầu vào; phủ `--cpu`/`--io`; `--json`;
-`--timeout`; `--version`; `oci-run` cảnh báo key lạ; tên cgroup/state kèm PID + retry rmdir.
+`--timeout`; `--version`; `oci-run` cảnh báo key lạ; tên cgroup/state kèm PID + retry rmdir;
+- bridge NAT + DNS + port mapping + cleanup (v1.5.1); soak 6000 vòng sạch; self-hosted runner CI.
+
+---
+
+
+### 11.1. Roadmap để đạt "production-grade" (chưa làm)
+
+Ba gap reviewer sẽ flag, kèm hướng xử lý và chi phí:
+
+1. **Multi-arch container verification (armv7l / riscv64 / x86_64).**
+   Hiện chỉ smoke-sdk (11/11) + `--version` qua qemu-user; full container cần kernel thật của arch đó.
+   - Hướng: qemu-system CI với image Linux tối thiểu cho từng arch, chạy `test.sh` bên trong.
+   - Chi phí: ~30–60 phút CI/run, image ~200 MB/arch. Khả thi nhưng chưa cần cho đồ án.
+   - Trạng thái: **documented limitation**, không chặn công bố.
+
+2. **Seccomp allow-list (thay deny-list 21 syscall).**
+   Allow-list an toàn hơn nhưng phải enumerate toàn bộ syscall mà runtime dùng trong setup + exec
+   (mount, clone, setns, ioctl, write, read, ... ~60 syscall) và test trên 4 arch × 2 kernel.
+   - Hướng: bắt đầu từ `strace -c` của một run thật để lấy danh sách, rồi chuyển sang allow-list
+     với `--seccomp=strict` opt-in, giữ deny-list làm mặc định.
+   - Chi phí: 2–3 ngày, rủi ro regression cao. Khuyến nghị làm sau khi có test matrix multi-arch.
+   - Trạng thái: **documented limitation**; deny-list hiện tại chặn được `bomb`/`breakout`/`mount`/
+     `ptrace`/`open_by_handle_at`.
+
+3. **Community / contributing (single maintainer).**
+   - Đã thêm: `CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/bug_report.md`,
+     `.github/PULL_REQUEST_TEMPLATE.md`.
+   - Còn thiếu: `CODE_OF_CONDUCT.md`, release notes tự động, changelog theo Keep a Changelog (đang làm thủ công).
+   - Trạng thái: **đã có khung**, đủ cho repo công khai.
 
 ---
 
@@ -455,13 +484,13 @@ thiếu quota → `--disk` + `RLIMIT_FSIZE`; validate đầu vào; phủ `--cpu`
 
 | # | Việc | Trạng thái |
 |---|---|---|
-| 1 | Tag + phát hành `v1.4.0` | CI đã xanh (`workflow_dispatch`), chờ quyết định |
-| 2 | Soak 24 h | `ITER=117000 bash build/soak.sh` |
-| 3 | Verify 4 asset musl trên phần cứng thật | mới aarch64 build local |
-| 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | chưa có |
+| 1 | Tag + phát hành `v1.4.0` | ✅ released 2026-10-30 (4 asset musl) |
+| 2 | Soak 6000 vòng (~1.1 h) | ✅ 6000/6000, err=0, leak=0, SOAK OK (2026-11-03) |
+| 3 | Verify 4 asset musl | ✅ smoke-sdk 11/11 × 4 arch (qemu); aarch64 container thật 84/84 (CI hardware-test) |
+| 4 | Self-hosted runner aarch64 | ✅ online + hardware-test CI (84/84) |
 | 5 | `sdk init/pack` (tên cũ `mc-sdk`) | ✅ v1.5.0, 10 test trong `test.sh` |
-| 6 | LICENSE | chưa chọn (MIT / Apache-2.0) |
-| 7 | Bridge NAT + DNS + port mapping | cân nhắc chi phí CPU |
+| 6 | LICENSE | ✅ MIT |
+| 7 | Bridge NAT + DNS + port mapping | ✅ v1.5.1 |
 
 ---
 
