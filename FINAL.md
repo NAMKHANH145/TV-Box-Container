@@ -1,4 +1,4 @@
-# FINAL.md — Kiến trúc và kết quả minicontainer v1.4.0
+# FINAL.md — Kiến trúc và kết quả minicontainer v1.5.1
 
 Tài liệu này mô tả **toàn bộ hệ thống từ đầu đến cuối**: triết lý, bản đồ module, luồng syscall của
 một lần `run`, từng cơ chế kernel được dùng, các bẫy đã gặp, bằng chứng kiểm chứng trên phần cứng thật,
@@ -6,7 +6,7 @@ so sánh với SOTA và giới hạn. Cách dùng CLI xem `GUIDE.md`; lịch s�
 nhật ký từng phase xem `progress/`.
 
 **Tóm tắt một dòng:** `minicontainer` là engine container zero-daemon viết bằng C, musl static
-(144.904 B bản Buildroot / 125.392 B asset CI v1.4.0, aarch64), 15 module / 2.412 dòng, chạy trên
+(149.000 B bản Buildroot, aarch64), 15 module / ~2.4 kB dòng C, chạy trên
 Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** trên box thật.
 
 ---
@@ -15,8 +15,8 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 
 | Artifact | Nội dung |
 |---|---|
-| `minicontainer` | 1 binary static, 0 daemon, ~145 KB (Buildroot) / 125 KB (asset CI v1.4.0) |
-| `build/test.sh` | 74 case tự động (cô lập, cgroup, seccomp, exec, bridge, read-only, pull, cleanup) |
+| `minicontainer` | 1 binary static, 0 daemon, ~149 KB (Buildroot, v1.5.1) |
+| `build/test.sh` | 84 case tự động (cô lập, cgroup, seccomp, exec, bridge, read-only, pull, sdk, cleanup) |
 | `build/soak.sh` | chạy vòng lặp, kiểm rò cgroup/mount/state, theo dõi `MemAvailable` |
 | `build/bench.sh` | đo p50/p95/p99 và so sánh Docker trên cùng box |
 | `build/release.sh` | tarball + `SHA256SUMS.txt` (version đọc từ `src/main.c`) |
@@ -337,8 +337,8 @@ hay process nào — vẫn là 1 binary. `run_wait`/`run_capture` (trước là 
 
 ### 8.1. Suite tự động
 
-`bash build/test.sh` trên box: **74/74 PASS** (v1.4.0). Suite hiện có **84 case** (thêm 10 case `sdk`
-ở v1.5.0; 10 case này đã chạy trên laptop vì `sdk` không cần root/quyền container):
+`bash build/test.sh` trên box: **84/84 PASS** (v1.5.1, 2026-11-03). Suite có **84 case** (74 runtime
++ 10 case `sdk`); Ctrl-C 20 lần liên tiếp **0 leak**; soak 200/200 vòng sạch.
 cô lập PID/UTS/fs, cgroup memory/cpu/pids/io, seccomp, breakout (chroot escape), userns, `/dev`,
 detach + state + stats, `exec` (uid/PID/seccomp/cgroup/id sai), bridge (IP, ping, veth cleanup),
 `--read-only` (8 case), `pull` (11 case), cleanup (cgroup/mount/state = 0).
@@ -472,7 +472,7 @@ Hệ thống đạt mục tiêu đề tài: tự gọi syscall Linux (`clone`, `
 (Process Management, Memory Management, File System, Namespaces, Cgroups), chạy được trên phần cứng
 hạn chế, zero-daemon, có số liệu đo thật và test tự động trên box.
 
-**Bottom line:** 15 module, 2.412 dòng C, zero-daemon, 1 binary static. Toàn bộ backlog R5 (health,
+**Bottom line:** 15 module, ~2.4 kB dòng C, zero-daemon, 1 binary static (149 KB). Backlog R5 (health,
 `exec`, bridge, `--read-only`, `pull`, `sdk`) đã xong; phần runtime verify trên phần cứng thật,
 `sdk` verify bằng test tự động (không cần root). Phần còn lại là việc hạ tầng (soak 24 h, runner tự
 host, LICENSE), không phải tính năng runtime.
@@ -486,5 +486,5 @@ host, LICENSE), không phải tính năng runtime.
 | Sao không nhúng `runc`/`crun` rồi gọi? | Mục tiêu là **zero-daemon, 1 binary, không stack**: `runc`/`crun` vẫn cần nơi tạo namespace, image/layer, config; `runc` ~224 ms và ~MB, `crun` ~47 ms. Ở đây `clone()` + `chroot` + cgroupfs + `execvp()` trực tiếp: 10–65 ms, 145 KB, 0 MB idle. Đánh đổi chấp nhận: **không chạy được image Docker/k8s** (§9, §11). |
 | `--disk` có phải quota thật không? | **Không.** Kernel box không có ext4 project quota (`quotactl` không hỗ trợ). Có 2 lớp: `RLIMIT_FSIZE` chặn tức thời **một file** (exit 153/SIGXFSZ), watchdog `nftw` 1 s chặn **tổng dung lượng** (burst xấu nhất ≈ 1 chu kỳ lấy mẫu). Nói rõ giới hạn này thay vì gọi là quota (§6.3, §7 #15). |
 | Bảo mật có tương đương Docker không? | Ba lớp: mount namespace private (`MS_REC\|MS_PRIVATE`) → userns map root trong ↔ 65534 ngoài → seccomp 21 syscall + `NO_NEW_PRIVS`; test `bomb`/`breakout`/`mount`/`ptrace`/`open_by_handle_at` đều bị chặn (§6.4, §8.1). **Không** tương đương: thiếu AppArmor/SELinux, deny-list chứ không allow-list, không `/sys`, không user namespace tuỳ biến. |
-| 74 hay 84 test? Có phải tất cả chạy trên box? | 74/74 là **trên box** ở v1.4.0. Suite hiện **84 case**: 10 case `sdk` mới chạy trên laptop (sdk không cần root/namespace). `test.sh` in `TONG=` ở dòng cuối để không lệch số. Phần cứng thật mới verify **aarch64**; 3 arch còn lại mới ở mức QEMU-user (§8.3). |
+| 74 hay 84 test? Có phải tất cả chạy trên box? | **84/84 PASS trên box** ở v1.5.1 (2026-11-03, CI `hardware-test` run 41665367554). `sdk` 10 case không cần root nên cũng pass trên laptop/CI. `test.sh` in `TONG=` ở dòng cuối. Phần cứng thật verify **aarch64**; 3 arch còn lại ở mức QEMU-user + smoke-sdk 11/11. |
 | Nếu kernel thiếu userns thì sao? | Box này có userns (đã map `0 65534 1` thành công). Thiếu userns thì "root trong container" = root trên host, mất một lớp phòng thủ; khi đó chỉ còn mount ns + seccomp và phải hạ tuyên bố bảo mật. Đây là lý do `FINAL §11` ghi rõ giới hạn thay vì quảng bá "an toàn như VM". |
