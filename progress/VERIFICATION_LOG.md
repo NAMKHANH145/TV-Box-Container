@@ -449,3 +449,38 @@ MIN_FREE_GB=99999 bash profiles/build.sh base-mini
   Đọc tĩnh: handler chỉ gọi `kill()`; `cgroup_kill` + `cgroup_cleanup` chạy sau `waitpid`,
   `cgroup_cleanup` retry `rmdir` 20 × 100 ms nên không cần `usleep(1500000)` cũ.
 - Soak 24 h.
+
+---
+
+## v1.5.0 — phần cứng thật (2026-11-03)
+
+Box S905W online (Tailscale `100.102.219.68`). Binary v1.5.0 đã deploy (`minicontainer 1.5.0 (aarch64, musl, static)`).
+
+### `bash test.sh` — **84/84 PASS, FAIL=0**
+
+Lệnh: `cd /root && bash test.sh` (bomb/breakout đã có sẵn ở `/opt/rootfs`). Kết quả dòng cuối:
+`=== KET QUA: PASS=84 FAIL=0 TONG=84 ===`. Toàn bộ nhóm `sdk init/pack` (10 case) đều xanh trên box thật,
+bao gồm round-trip `pack → pull → run`.
+
+### Ctrl-C 20 lần liên tiếp — **0 leak**
+
+Script `/root/ctrlc-test.sh`: mỗi vòng fork `minicontainer run ... sleep 30`, `sleep 1`, `kill -INT`,
+`wait`, `sleep 3`, rồi kiểm `/sys/fs/cgroup/minicontainer-*` và `/opt/rootfs/.oldroot`.
+Kết quả: `CTRLC_FAIL=0`. Đường dọn dẹp mới (handler chỉ `kill`, dọn sau `waitpid`) không rò cgroup
+hay `.oldroot` — bù lại cho việc bỏ `usleep(1500000)` trong handler cũ.
+
+### Tag `v1.5.0` đã phát hành
+
+`git tag -a v1.5.0` → push tag → CI run `41657038848` **success** (smoke-sdk 11 s, 4 build 12–14 s,
+release 11 s). Asset:
+- `minicontainer-linux-aarch64` 133.584 B
+- `minicontainer-linux-armv7l` 120.552 B
+- `minicontainer-linux-riscv64` 108.904 B
+- `minicontainer-linux-x86_64` 108.896 B
+- `SHA256SUMS.txt` (527 B), `smoke-sdk.sh` (2.838 B), `test.sh` (18.688 B)
+
+### Việc còn lại
+
+- Soak 24 h (`ITER=117000`) — người dùng giám sát; lệnh gửi kèm.
+- Huy verify 4 asset musl trên phần cứng (aarch64 box thật; 3 arch còn lại qemu-user) +
+  `bash smoke-sdk.sh ./minicontainer-linux-<arch>` từng arch.

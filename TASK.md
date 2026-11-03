@@ -118,7 +118,7 @@ Task P0 trễ → cắt P2 trước, **không** cắt test và không hạ số 
 
 | ID | Việc | Ưu tiên | Trạng thái |
 |---|---|---|---|
-| C1 | `test.sh` mở rộng (nay **84 case**) | P0 | 🟡 74/74 trên box; 10 case `sdk` mới chạy trên laptop |
+| C1 | `test.sh` mở rộng (nay **84 case**) | P0 | ✅ **84/84 PASS** trên box (v1.5.0, 2026-11-03) |
 | C2 | Soak 24 h | P1 | 🟡 800 vòng/588 s sạch; 24 h chưa chạy |
 | C3 | Security regression (bomb, breakout, mount, ptrace, `open_by_handle_at`) | P1 | ✅ |
 | C4 | Test đa kiến trúc | P2 | ✅ aarch64 + x86_64 native; armv7l/riscv64 QEMU |
@@ -196,17 +196,17 @@ CI musl + 74 test (v1.4.0).
 | # | Việc | Track | Ghi chú |
 |---|---|---|---|
 | 1 | Soak 24 h | C | `ITER=117000 bash build/soak.sh` (1.36 vòng/s) — ghi số vào `progress/VERIFICATION_LOG.md` |
-| 2 | Tag + phát hành `v1.5.0` | B | sau khi soak xong: `bash build/release.sh` rồi `git tag v1.5.0`; CI dựng 4 asset musl |
+| 2 | Tag + phát hành `v1.5.0` | B | ✅ released 2026-11-03 (CI run 41657038848, 4 asset musl + smoke-sdk.sh + test.sh) |
 | 3 | Verify 4 asset musl trên phần cứng thật | C | mới aarch64 build local; qemu cho 3 arch còn lại |
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |
 | 5 | Bridge NAT + DNS + port mapping | A | cân nhắc chi phí CPU trên S905W; chỉ làm khi có nhu cầu thật |
 | 6 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
 | 7 | Verify asset bằng `smoke-sdk.sh` trên 4 arch | B | tải asset rồi `bash smoke-sdk.sh ./minicontainer-linux-<arch>` |
 
-Đã xong 2026-10-30 (không cần box): tag `v1.4.0` (CI dựng 4 asset musl), `sdk init/pack` + 10 test,
-LICENSE MIT, `test.sh` in tổng số case, `smoke-sdk.sh` + job CI `smoke-sdk` (push `main` + PR),
-`profiles/build.sh --clean` + kiểm dung lượng, signal handler của `run.c` chỉ còn thao tác
-async-signal-safe.
+Đã xong 2026-11-03: tag **v1.5.0** phát hành (4 asset musl), `test.sh` **84/84 PASS** trên box,
+Ctrl-C 20 lần liên tiếp **0 leak**, soak 24 h đang chạy (người dùng giám sát).
+Trước đó (2026-10-30, không cần box): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job
+CI, `profiles/build.sh --clean`, LICENSE MIT, signal handler `run.c` async-signal-safe.
 
 ## 8. Việc chưa nên làm (tránh phân tâm)
 
