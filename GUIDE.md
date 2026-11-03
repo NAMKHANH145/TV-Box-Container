@@ -28,8 +28,8 @@ ls /proc/self/ns                          # đủ 10 namespace
 minicontainer --version
 ```
 
-`minicontainer --version` in ra `minicontainer 1.4.0 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
-đó không phải bản chuẩn (bản chuẩn 100–137 KB, glibc thường 440–930 KB).
+`minicontainer --version` in ra `minicontainer 1.5.0 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
+đó không phải bản chuẩn (bản chuẩn ~145 KB, glibc static thường 440–930 KB).
 
 ---
 
@@ -56,7 +56,7 @@ Kiểm tra kết quả:
 
 ```bash
 file build/minicontainer   # ELF 64-bit ... ARM aarch64, statically linked, stripped
-ls -l build/minicontainer  # ~125 KB
+ls -l build/minicontainer  # ~145 KB
 ```
 
 ### 2.2. Build giống CI (4 kiến trúc, không cần cài cross-toolchain)
@@ -106,7 +106,7 @@ ssh root@<IP_BOX> 'chmod +x /usr/local/bin/minicontainer'
 Từ release GitHub (asset mất bit `+x` sau khi tải — phải `chmod`):
 
 ```bash
-gh release download v1.4.0 --pattern 'minicontainer-linux-aarch64'
+gh release download v1.5.0 --pattern 'minicontainer-linux-aarch64'
 chmod +x minicontainer-linux-aarch64
 scp minicontainer-linux-aarch64 root@<IP_BOX>:/usr/local/bin/minicontainer
 ```
