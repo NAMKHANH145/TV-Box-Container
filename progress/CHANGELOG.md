@@ -1,5 +1,20 @@
 # CHANGELOG — minicontainer
 
+## [1.5.2] - 2026-11-04
+
+### Added
+- **`--seccomp=strict`** (allow-list ~120 syscall, Docker default profile subset) với `#ifdef __NR_*`
+  guard cho 4 arch. Default vẫn deny-list (backward compat); `--seccomp=off` tắt filter.
+  Test strict mode trên box: `test.sh` 84/84 PASS, wget outbound, exec, read-only, pipe, tar OK.
+- `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, `.github/ISSUE_TEMPLATE/bug_report.md`,
+  `.github/PULL_REQUEST_TEMPLATE.md`.
+- `FINAL.md §11.1`: roadmap production (multi-arch container verify, seccomp allow-list, community).
+
+### Verified
+- Soak 6000/6000 vòng: err=0, leak=0, SOAK OK (v1.5.1 binary, 2026-11-03).
+- hardware-test CI: 84/84 PASS (run 41667445407, job 126069824540, 2026-11-03).
+- Ctrl-C 20×: 0 leak (v1.5.1 binary).
+
 ## [1.5.1] - 2026-11-03
 
 ### Added

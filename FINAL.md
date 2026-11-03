@@ -483,7 +483,7 @@ Ba gap reviewer sẽ flag, kèm hướng xử lý và chi phí:
 |---|---|---|
 | 1 | Tag + phát hành `v1.4.0` | ✅ released 2026-10-30 (4 asset musl) |
 | 2 | Soak 6000 vòng (~1.1 h) | ✅ 6000/6000, err=0, leak=0, SOAK OK (2026-11-03) |
-| 3 | Verify 4 asset musl | ✅ smoke-sdk 11/11 × 4 arch (qemu); aarch64 container thật 84/84 (CI hardware-test) |
+| 3 | Verify 4 asset musl | ✅ smoke-sdk 11/11 × 4 arch (qemu); aarch64 container thật 84/84 (CI hardware-test, run 41665367554) |
 | 4 | Self-hosted runner aarch64 | ✅ online + hardware-test CI (84/84) |
 | 5 | `sdk init/pack` (tên cũ `mc-sdk`) | ✅ v1.5.0, 10 test trong `test.sh` |
 | 6 | LICENSE | ✅ MIT |

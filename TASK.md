@@ -197,16 +197,18 @@ CI musl + 74 test (v1.4.0).
 |---|---|---|---|
 | 1 | Soak 6000 vòng (~1.1 h) | C | ✅ 6000/6000, err=0, leak=0, SOAK OK (2026-11-03). 24 h aspirational chưa chạy |
 | 2 | Tag + phát hành `v1.5.0` | B | ✅ released 2026-11-03 (CI run 41657038848, 4 asset musl + smoke-sdk.sh + test.sh) |
-| 3 | Verify 4 asset musl trên phần cứng thật | C | mới aarch64 build local; qemu cho 3 arch còn lại |
-| 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |
+| 3 | Verify 4 asset musl | C/B | ✅ smoke-sdk 11/11 × 4 arch (qemu); aarch64 container 84/84 (CI hardware-test) |
+| 4 | Self-hosted runner aarch64 | B | ✅ online + hardware-test CI (84/84) |
 | 5 | Bridge NAT + DNS + port mapping | A | ✅ v1.5.1 (masquerade + DNS mặc định 8.8.8.8/1.1.1.1 + -p/--publish) |
 | 6 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
-| 7 | Verify asset bằng `smoke-sdk.sh` trên 4 arch | B | tải asset rồi `bash smoke-sdk.sh ./minicontainer-linux-<arch>` |
+| 7 | Seccomp strict mode + tests | A | ✅ `--seccomp=strict` allow-list ~120 syscall, test.sh 84/84 pass |
 
-Đã xong 2026-11-03: tag **v1.5.0** phát hành (4 asset musl), `test.sh` **84/84 PASS** trên box,
-Ctrl-C 20 lần liên tiếp **0 leak**, soak 24 h đang chạy (người dùng giám sát).
-Trước đó (2026-10-30, không cần box): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job
-CI, `profiles/build.sh --clean`, LICENSE MIT, signal handler `run.c` async-signal-safe.
+Đã xong 2026-11-04: tag **v1.5.0** phát hành (4 asset musl), `test.sh` **84/84 PASS** trên box (CI
+hardware-test), Ctrl-C 20× **0 leak**, soak **6000/6000** err=0 leak=0 SOAK OK, bridge NAT + DNS +
+port mapping + cleanup, `--seccomp=strict` allow-list (~120 syscall, test.sh 84/84), self-hosted
+runner online, CONTRIBUTING/COC/templates, production roadmap §11.1.
+Trước đó (2026-10-30): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job CI,
+`profiles/build.sh --clean`, LICENSE MIT, signal handler `run.c` async-signal-safe.
 
 ## 8. Việc chưa nên làm (tránh phân tâm)
 

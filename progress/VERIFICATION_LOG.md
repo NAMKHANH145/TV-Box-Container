@@ -544,3 +544,37 @@ Kết quả: **6000/6000 vòng, err=0, leak=0, SOAK OK**. Vùng leak trước đ
 | Kết luận | LEAK | SOAK OK |
 
 Nguyên nhân fix: `do_rm` thêm unlink `publish` + coi zombie là đã chết (tránh `rm` thất bại khi container vừa bị `stop`).
+
+---
+
+## v1.5.2 — Seccomp strict mode + hardware-test cuối (2026-11-04)
+
+### Seccomp `--seccomp=strict` (allow-list ~120 syscall)
+
+Binary v1.5.2 (`minicontainer 1.5.2 (aarch64, musl, static)`), box S905W.
+
+- `minicontainer run --seccomp=strict --rootfs /opt/rootfs /bin/sh -c "echo hi; id; cat /etc/hostname"` → OK
+- `--seccomp=strict --net=bridge`: `wget http://example.com` → HTML trả về (outbound OK)
+- `--seccomp=strict --read-only`: ghi `/etc/t` bị chặn (Read-only file system)
+- `--seccomp=strict`: exec vào container detached → `exec_ok`
+- `--seccomp=strict`: pipe + redirect + tar → OK
+- `--seccomp=off`: không cài filter → OK
+- Wrapper test: `MC=/tmp/mc-strict bash test.sh` → **PASS=84 FAIL=0 TONG=84** (strict mode, toàn bộ suite)
+- Deny-list vẫn là mặc định (backward compat); strict là opt-in.
+
+### hardware-test CI cuối cùng
+
+- Run `41667445407`, job `126069824540`, completed 2026-11-03T17:01:19Z
+- Log: `=== KET QUA: PASS=84 FAIL=0 TONG=84 ===`
+- smoke-sdk: 11/11 (run cùng)
+- Đây là bằng chứng cuối cùng: test.sh 84/84 trên TV Box thật qua CI (self-hosted runner).
+
+### Trạng thái tổng
+
+- Soak 6000/6000: ✅ err=0, leak=0, SOAK OK
+- test.sh 84/84: ✅ (CI hardware-test + manual)
+- Ctrl-C 20×: ✅ 0 leak
+- smoke-sdk 11/11 × 4 arch: ✅
+- Bridge NAT/DNS/port mapping: ✅ (outbound + DNAT + cleanup)
+- Seccomp strict mode: ✅ (84/84 dưới strict)
+- Self-hosted runner: ✅ online
