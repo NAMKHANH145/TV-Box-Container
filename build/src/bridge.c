@@ -3,9 +3,8 @@
  * Mot bridge chung `mcbr0` (10.88.0.1/16) + mot cap veth per container.
  * Host dung `ip` (iproute2) de tao/di veth vao netns cua container; container
  * tu cau hinh interface bang ioctl (khong can `ip` trong rootfs).
- * Khong co daemon, khong co NAT: container noi duoc voi host va cac
- * container khac cung bridge.
- */
+ * Co NAT (masquerade) de container ra Internet, va --publish HOST:CONTAINER
+ * (DNAT) de nhan ket noi tu LAN. Don dep khi stop/rm. Khong daemon. */
 #include "common.h"
 #include <net/if.h>
 #include <netinet/in.h>
@@ -30,6 +29,143 @@ static int run_ip(char *const argv[]) {
 	int st;
 	if (waitpid(p, &st, 0) < 0) return -1;
 	return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : -1;
+}
+
+/* iptables wrapper (for NAT/DNAT). Tra ve 0 neu lenh OK. */
+static int run_ipt(char *const argv[]) {
+	pid_t p = fork();
+	if (p < 0) return -1;
+	if (p == 0) {
+		int fd = open("/dev/null", O_RDWR);
+		if (fd >= 0) { dup2(fd, 1); dup2(fd, 2); if (fd > 2) close(fd); }
+		execvp("/usr/sbin/iptables", argv);
+		_exit(127);
+	}
+	int st;
+	if (waitpid(p, &st, 0) < 0) return -1;
+	return (WIFEXITED(st) && WEXITSTATUS(st) == 0) ? 0 : -1;
+}
+
+static char **g_publish;
+static int g_npublish;
+
+void bridge_set_publishes(char **p, int n) {
+	g_publish = p;
+	g_npublish = n;
+}
+
+static int has_iptables(void) {
+	char *av[] = { "/usr/sbin/iptables", "--version", NULL };
+	return run_ipt(av) == 0;
+}
+
+static void enable_ip_forward(void) {
+	int fd = open("/proc/sys/net/ipv4/ip_forward", O_WRONLY);
+	if (fd >= 0) { (void)write(fd, "1", 1); close(fd); }
+}
+
+/* Tim interface co default route (doc /proc/net/route, khong can `ip`). */
+static void default_iface(char *out, size_t n) {
+	FILE *f = fopen("/proc/net/route", "r");
+	if (!f) { snprintf(out, n, "eth0"); return; }
+	char line[256];
+	fgets(line, sizeof line, f); /* header */
+	while (fgets(line, sizeof line, f)) {
+		char iface[64]; unsigned dest;
+		if (sscanf(line, "%63s %x", iface, &dest) == 2 && dest == 0) {
+			snprintf(out, n, "%s", iface);
+			fclose(f);
+			return;
+		}
+	}
+	fclose(f);
+	snprintf(out, n, "eth0");
+}
+
+static void ipt_add(char *const av[]) { run_ipt(av); }  /* best-effort */
+
+static void nat_setup(const char *container_ip) {
+	if (!has_iptables()) {
+		fprintf(stderr, "minicontainer: --net=bridge: khong co iptables -> container khong ra duoc Internet/NAT. "
+		                "Cai iptables de bat NAT + port mapping.\n");
+		return;
+	}
+	enable_ip_forward();
+
+	char uplink[64];
+	default_iface(uplink, sizeof uplink);
+
+	/* Masquerade toan bo subnet bridge -> uplink. */
+	/* Masquerade toan bo subnet bridge -> uplink. */
+	char *masq[] = { "iptables", "-t", "nat", "-A", "POSTROUTING",
+	                  "-s", "10.88.0.0/16", "-o", uplink, "-j", "MASQUERADE", NULL };
+	ipt_add(masq);
+
+	/* Cho phep forward cho subnet bridge (ca hai chieu). */
+	char *fwd_out[] = { "iptables", "-A", "FORWARD", "-s", "10.88.0.0/16", "-j", "ACCEPT", NULL };
+	char *fwd_in[]  = { "iptables", "-A", "FORWARD", "-d", "10.88.0.0/16",
+	                    "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT", NULL };
+	ipt_add(fwd_out);
+	ipt_add(fwd_in);
+
+	/* Port mapping: -p hostport:containerport (TCP). */
+	for (int i = 0; i < g_npublish; i++) {
+		char *spec = g_publish[i];
+		char *colon = strchr(spec, ':');
+		if (!colon) {
+			fprintf(stderr, "minicontainer: --publish '%s' sai dinh dang (can HOST:CONTAINER)\n", spec);
+			continue;
+		}
+		*colon = '\0';
+		const char *hp = spec;
+		const char *cp = colon + 1;
+		char *dnat[] = { "iptables", "-t", "nat", "-A", "PREROUTING",
+		                 "-p", "tcp", "--dport", (char *)hp,
+		                 "-j", "DNAT", "--to-destination", NULL, NULL, NULL };
+		/* build "--to-destination IP:PORT" */
+		static char todest[128];
+		snprintf(todest, sizeof todest, "%s:%s", container_ip, cp);
+		dnat[12] = todest;
+		ipt_add(dnat);
+		char *allow[] = { "iptables", "-A", "FORWARD", "-p", "tcp", "-d", (char *)container_ip,
+		                  "--dport", (char *)cp, "-j", "ACCEPT", NULL };
+		ipt_add(allow);
+		*colon = ':';
+	}
+}
+
+static void nat_teardown(const char *container_ip) {
+	if (!has_iptables()) return;
+	char uplink[64];
+	default_iface(uplink, sizeof uplink);
+
+	char *masq[] = { "iptables", "-t", "nat", "-D", "POSTROUTING",
+	                  "-s", "10.88.0.0/16", "-o", uplink, "-j", "MASQUERADE", NULL };
+	run_ipt(masq);
+	char *fwd_out[] = { "iptables", "-D", "FORWARD", "-s", "10.88.0.0/16", "-j", "ACCEPT", NULL };
+	char *fwd_in[]  = { "iptables", "-D", "FORWARD", "-d", "10.88.0.0/16",
+	                    "-m", "state", "--state", "ESTABLISHED,RELATED", "-j", "ACCEPT", NULL };
+	run_ipt(fwd_out);
+	run_ipt(fwd_in);
+
+	for (int i = 0; i < g_npublish; i++) {
+		char buf[64];
+		snprintf(buf, sizeof buf, "%s", g_publish[i]);
+		char *colon = strchr(buf, ':');
+		if (!colon) continue;
+		*colon = '\0';
+		const char *hp = buf;
+		const char *cp = colon + 1;
+		static char todest[128];
+		snprintf(todest, sizeof todest, "%s:%s", container_ip, cp);
+		char *dnat[] = { "iptables", "-t", "nat", "-D", "PREROUTING",
+		                 "-p", "tcp", "--dport", (char *)hp,
+		                 "-j", "DNAT", "--to-destination", todest, NULL };
+		run_ipt(dnat);
+		char *allow[] = { "iptables", "-D", "FORWARD", "-p", "tcp", "-d", (char *)container_ip,
+		                  "--dport", (char *)cp, "-j", "ACCEPT", NULL };
+		run_ipt(allow);
+	}
 }
 
 static int ip_exists(const char *dev) {
@@ -79,6 +215,7 @@ int bridge_setup(pid_t child, struct bridge_cfg *bc) {
 	snprintf(bc->gw, sizeof bc->gw, "%s", MC_BR_GW);
 	ip_for_pid(child, bc->ip, sizeof bc->ip);
 	bc->prefix = MC_BR_PREFIX;
+	nat_setup(bc->ip);
 	return 0;
 
 fail:
@@ -91,6 +228,9 @@ fail:
 void bridge_teardown(pid_t child) {
 	char host[IFNAMSIZ];
 	snprintf(host, sizeof host, "mcv%u", (unsigned)child);
+	char ip[64];
+	ip_for_pid(child, ip, sizeof ip);
+	nat_teardown(ip);
 	char *del[] = { "ip", "link", "del", host, NULL };
 	run_ip(del);
 }

@@ -484,3 +484,29 @@ release 11 s). Asset:
 - Soak 24 h (`ITER=117000`) — người dùng giám sát; lệnh gửi kèm.
 - Huy verify 4 asset musl trên phần cứng (aarch64 box thật; 3 arch còn lại qemu-user) +
   `bash smoke-sdk.sh ./minicontainer-linux-<arch>` từng arch.
+
+
+---
+
+## v1.5.1 — Bridge NAT/DNS/port mapping + self-hosted runner (2026-11-03)
+
+### Bridge NAT trên phần cứng thật (S905W)
+
+- Outbound: `minicontainer run --net=bridge ... /bin/sh -c "wget ... http://example.com"` → HTML trả về, DNS
+  resolve qua 8.8.8.8/1.1.1.1 (ghi vào rootfs `/etc/resolv.conf`).
+- Port mapping: `--net=bridge -p 8080:80` → iptables PREROUTING có `DNAT tcp dpt:8080 to:<containerip>:80`.
+- Cleanup: foreground và detached đều remove masquerade + DNAT + veth khi container exit / `stop` / `rm`.
+- Soak 200/200 vòng (bridge case 포함): `loi=0 lan-leak=0`, `SOAK OK`; MemAvailable 1.575.352 → 1.575.352 kB (giam -7 kB).
+
+### Self-hosted runner
+
+- Runner `tvbox-s905w` online (labels `self-hosted, Linux, ARM64, aarch64`), chạy dưới systemd.
+- Job `hardware-test` trong CI: `bash build/test.sh` trên TV Box → **PASS=84 FAIL=0 TONG=84** (run `41664819622`).
+- git cài trên box (`git 2.53.0`) để `actions/checkout@v4` chạy được.
+
+### Sửa lỗi phát hiện qua soak
+
+- `do_rm` bỏ sót unlink `publish` → state dir không rỗng → leak. Đã unlink.
+- `do_rm` coi zombie (`/proc/<pid>/stat` state `Z`) là đã chết → tránh `rm` thất bại khi container vừa
+  bị `stop` (nguyên nhân leak soak trước đó).
+- Soak trước đó leak `cgroups=1 state=1` mỗi ~20 vòng → sau fix: 200/200 sạch.

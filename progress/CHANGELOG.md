@@ -1,5 +1,30 @@
 # CHANGELOG — minicontainer
 
+## [1.5.1] - 2026-11-03
+
+### Added
+- **Bridge NAT / DNS / port mapping** (`bridge.c`, `run.c`, `cli.c`, `common.h`, `state.c`):
+  - `--net=bridge` giờ có NAT masquerade (container ra Internet) + DNS mặc định (8.8.8.8 / 1.1.1.1
+    ghi vào rootfs `/etc/resolv.conf` khi không phải `--read-only`) + `--publish HOST:CONTAINER` / `-p`
+    (DNAT cho TCP).
+  - Host dùng `/usr/sbin/iptables` (absolute path) qua `run_ipt()`; uplink tự detect từ `/proc/net/route`.
+  - Don dep NAT + veth khi `stop`/`rm` (và reaper cho detached container, poll `/proc/<pid>/stat`).
+  - State dir lưu `ip` + `publish` để `stop`/`rm` (process khác) don dung port.
+- Self-hosted runner `tvbox-s905w` (aarch64) trên TV Box; job CI `hardware-test` chạy `test.sh` (84/84)
+  trên phần cứng thật mỗi push `main`/tag.
+- `--publish`/`-p` trong `print_usage`.
+
+### Fixed
+- `do_rm` bỏ sót unlink `publish` → thư mục state không rỗng → leak. Đã unlink.
+- `do_rm` coi zombie (`/proc/<pid>/stat` state `Z`) là đã chết → không còn `rm` thất bại khi container
+  vừa bị `stop` (nguyên nhân leak soak trước đó).
+- Soak 200/200 vòng: `loi=0 lan-leak=0`, `SOAK OK` (sau fix).
+
+### Changed
+- VERSION 1.5.0 → **1.5.1** (`minicontainer 1.5.1 (aarch64, musl, static)`, 149.000 B).
+- `bridge.c` header: mô tả NAT/DNS/port mapping + cleanup.
+- TASK.md: A5 ✅; bỏ mục "Bridge NAT" khỏi danh sách việc còn lại.
+
 ## [1.5.0] - 2026-10-30
 
 ### Added

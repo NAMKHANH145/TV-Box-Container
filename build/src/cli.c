@@ -34,6 +34,16 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 		else if (OPT1("--rootfs") || OPT2("--rootfs", "--rootfs=")) cf->rootfs = val;
 		else if (OPT1("--net") || OPT2("--net", "--net=")) cf->net = val;
 		else if (OPT1("--hostname") || OPT2("--hostname", "--hostname=")) cf->hostname = val;
+		else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
+			cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
+			cf->publish[cf->npublish++] = (char *)argv[++i];
+			cf->publish[cf->npublish] = NULL;
+		}
+		else if (OPT2("--publish", "--publish=")) {
+			cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
+			cf->publish[cf->npublish++] = (char *)val;
+			cf->publish[cf->npublish] = NULL;
+		}
 		else if (strcmp(argv[i], "--") == 0) { cf->cmd = &argv[++i]; break; }
 		else { cf->cmd = &argv[i]; break; }
 	}
@@ -42,7 +52,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 void print_usage(const char *prog) {
 	fprintf(stderr, "Usage: %s run [--ram=30M] [--cpu=20] [--pids=64] [--io=1M] [--disk=100M] [--detach|-d] [--name=ID]\n"
 		"                  [--net=host|isolated|bridge] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
-		"                  [--read-only]\n"
+		"                  [--read-only] [--publish HOST:CONTAINER | -p HOST:CONTAINER]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
 		"       %s oci-run <bundle> | service create <name> <cmd> [args...] |\n"
 		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] |\n"

@@ -45,6 +45,8 @@ struct cfg {
 	const char *net;
 	const char *hostname;
 	char **cmd;
+	char **publish;      /* "hostport:containerport", NULL-terminated */
+	int npublish;
 };
 
 struct child_arg {
@@ -81,6 +83,8 @@ void cgroup_kill(const char *cgdir);
 int cgroup_empty(const char *cgdir);
 
 int do_run(struct cfg *c);
+int do_pull(int argc, char **argv);
+int do_sdk(int argc, char **argv);
 
 int do_stats(const char *id, int json);
 int do_ps(int json);
@@ -99,8 +103,8 @@ void validate_input(struct cfg *c);
 void kill_pids_in_cgroup(const char *cgdir, int sig);
 
 int do_service_create(int argc, char **argv);
-int do_pull(int argc, char **argv);
-int do_sdk(int argc, char **argv);
+/* Khai bao bridge_set_publishes (bridge.c) */
+void bridge_set_publishes(char **p, int n);
 
 #ifndef SYS_pivot_root
 #define SYS_pivot_root 217

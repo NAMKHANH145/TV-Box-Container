@@ -99,7 +99,7 @@ Task P0 trễ → cắt P2 trước, **không** cắt test và không hạ số 
 | A2 | `exec <id> <cmd>` bằng `setns` thuần C (không `nsenter`) | P1 | ✅ |
 | A3 | `--net=bridge`: `mcbr0` + veth bằng ioctl | P2 | ✅ |
 | A4 | Seccomp theo `__NR_*` portable 4 arch | P2 | ✅ |
-| A5 | Bridge NAT/DNS/port mapping ra LAN | P3 | ⬜ (§7) |
+| A5 | Bridge NAT/DNS/port mapping ra LAN | P3 | ✅ v1.5.1 (masquerade + DNS + -p/--publish + reaper cleanup) |
 | A6 | `--read-only` + tmpfs `/tmp` `/run` `/dev/shm` | P1 | ✅ |
 | A7 | `pull <profile>` an toàn (sha256, chặn tar xấu, atomic) | P1 | ✅ |
 | A8 | `sdk init` / `sdk pack` (tên cũ `mc-sdk`) | P1 | ✅ v1.5.0, 10 test |
@@ -199,7 +199,7 @@ CI musl + 74 test (v1.4.0).
 | 2 | Tag + phát hành `v1.5.0` | B | ✅ released 2026-11-03 (CI run 41657038848, 4 asset musl + smoke-sdk.sh + test.sh) |
 | 3 | Verify 4 asset musl trên phần cứng thật | C | mới aarch64 build local; qemu cho 3 arch còn lại |
 | 4 | Self-hosted runner aarch64 chạy `test.sh` trước release | B | đăng ký runner là thao tác shared state |
-| 5 | Bridge NAT + DNS + port mapping | A | cân nhắc chi phí CPU trên S905W; chỉ làm khi có nhu cầu thật |
+| 5 | Bridge NAT + DNS + port mapping | A | ✅ v1.5.1 (masquerade + DNS mặc định 8.8.8.8/1.1.1.1 + -p/--publish) |
 | 6 | Demo 5 phút | D | asciinema/video, chạy lại được, không cắt ghép |
 | 7 | Verify asset bằng `smoke-sdk.sh` trên 4 arch | B | tải asset rồi `bash smoke-sdk.sh ./minicontainer-linux-<arch>` |
 

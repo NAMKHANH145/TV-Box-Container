@@ -97,7 +97,6 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 4. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local); asset mới có kèm
    `smoke-sdk.sh` nên mỗi arch tự kiểm được `sdk` mà không cần root.
 5. Self-hosted runner aarch64 chạy `test.sh` trước release.
-6. Bridge NAT/DNS/port mapping — chỉ làm khi có nhu cầu thật.
 
 Đã xong 2026-10-30 (không cần box): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job CI,
 `profiles/build.sh --clean` + kiểm dung lượng, LICENSE MIT, signal handler `run.c` async-signal-safe.

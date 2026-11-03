@@ -31,7 +31,26 @@ static void setup_tick(void) {
 	sigaction(SIGALRM, &sa, NULL);
 }
 
+static void ensure_dns(const char *rootfs, const char *net) {
+	if (strcmp(net, "host") == 0) return;   /* dung resolver cua host */
+	char p[PATH_MAX + 64];
+	if (snprintf(p, sizeof p, "%s/etc", rootfs) >= (int)sizeof p) return;
+	mkdir(p, 0755);   /* bo qua EEXIST */
+	if (snprintf(p, sizeof p, "%s/etc/resolv.conf", rootfs) >= (int)sizeof p) return;
+	/* Chi ghi neu file khong ton tai hoac dang tro ve stub loopback (Docker). */
+	FILE *f = fopen(p, "r");
+	char buf[256] = {0};
+	if (f) { (void)fread(buf, 1, sizeof buf - 1, f); fclose(f); }
+	if (buf[0] && strstr(buf, "nameserver") && !strstr(buf, "127.0.0."))
+		return;   /* user da cau hinh DNS rieng -> giu nguyen */
+	f = fopen(p, "w");
+	if (!f) return;
+	fputs("nameserver 8.8.8.8\nnameserver 1.1.1.1\n", f);
+	fclose(f);
+}
+
 int do_run(struct cfg *c) {
+	ensure_dns(c->rootfs, c->net);
 	char cgdir[PATH_MAX];
 	cgroup_setup(c, cgdir);
 
@@ -82,6 +101,7 @@ int do_run(struct cfg *c) {
 	 * cau hinh interface (con can netns da co san veth cua no). */
 	struct bridge_cfg bc;
 	int have_bc = 0;
+	bridge_set_publishes(c->publish, c->npublish);
 	if (strcmp(c->net, "bridge") == 0) {
 		if (bridge_setup(child, &bc) < 0) {
 			kill(child, SIGKILL);
@@ -133,6 +153,19 @@ int do_run(struct cfg *c) {
 		if (have_bc) {
 			snprintf(f, sizeof f, "%s/ip", dir);
 			write_file(f, bc.ip);
+			/* Luu danh sach publish de stop/rm (process khac) don NAT dung port. */
+			if (c->npublish > 0) {
+				char pb[512]; size_t o = 0;
+				for (int i = 0; i < c->npublish && o < sizeof pb - 1; i++) {
+					if (o) pb[o++] = ' ';
+					size_t l = strlen(c->publish[i]);
+					if (o + l > sizeof pb - 1) l = sizeof pb - 1 - o;
+					memcpy(pb + o, c->publish[i], l); o += l;
+				}
+				pb[o] = 0;
+				snprintf(f, sizeof f, "%s/publish", dir);
+				write_file(f, pb);
+			}
 		}
 
 		/* Watchdog detached: 1 process/container, tu thoat khi container chet.
@@ -158,6 +191,26 @@ int do_run(struct cfg *c) {
 				fprintf(stderr, "minicontainer: warning: khong tao duoc watchdog: %s\n", strerror(errno));
 			}
 		}
+		/* Bridge reaper: don NAT + veth khi container detached chet, vi cha da
+		 * thoat. Poll /proc (khong waitpid duoc vi reaper khong phai cha). */
+		if (have_bc) {
+			pid_t rp = fork();
+			if (rp == 0) {
+				setsid();
+				int nfd = open("/dev/null", O_RDWR);
+				if (nfd >= 0) { dup2(nfd, 0); dup2(nfd, 1); dup2(nfd, 2); if (nfd > 2) close(nfd); }
+				for (;;) {
+					char sp[256], *p;
+					snprintf(sp, sizeof sp, "/proc/%d/stat", (int)child);
+					if (read_small(sp, sp, sizeof sp) != 0) break;  /* gone */
+					if ((p = strchr(sp, ')')) && p[2] == 'Z') break;  /* zombie */
+					sleep(1);
+				}
+				bridge_teardown(child);
+				_exit(0);
+			}
+		}
+
 		printf("%s\n", id);
 		free(stack);
 		return 0;

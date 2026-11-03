@@ -28,7 +28,7 @@ ls /proc/self/ns                          # đủ 10 namespace
 minicontainer --version
 ```
 
-`minicontainer --version` in ra `minicontainer 1.5.0 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
+`minicontainer --version` in ra `minicontainer 1.5.1 (aarch64, musl, static)` — nếu ghi `glibc` thì binary
 đó không phải bản chuẩn (bản chuẩn ~145 KB, glibc static thường 440–930 KB).
 
 ---
@@ -238,17 +238,21 @@ không còn veth `mcv*`/`mcc*`, không còn mount dưới rootfs. Nếu còn →
 
 `bridge`: tạo `veth` cặp `mcv<pid>`/`mcc<pid>`; phía host dùng `ip` (iproute2) để gắn vào `mcbr0`,
 phía container cấu hình bằng ioctl (rootfs không cần `ip`). IP dẫn xuất từ PID host
-(`10.88.<pid/256>.<pid%256>`) và ghi tại `/run/minicontainer/<id>/ip`.
+(`10.88.<pid/256>.<pid%256>`) và ghi tại `/run/minicontainer/<id>/ip`. Host tự bật `ip_forward` và thêm
+NAT masquerade để container ra Internet; `/etc/resolv.conf` được ghi mặc định `8.8.8.8`/`1.1.1.1`
+(trừ `--read-only` thì giữ file có sẵn). Port mapping bằng `--publish`/`-p HOST:CONTAINER` (TCP, DNAT).
 
 ```bash
-minicontainer run -d --name web --net=bridge --read-only \
+# container ra Internet + host publish port 8080 -> container 80
+minicontainer run -d --name web --net=bridge -p 8080:80 --read-only \
   --rootfs=/opt/rootfs-web /usr/sbin/lighttpd -f /etc/lighttpd.conf -D
 cat /run/minicontainer/web/ip          # 10.88.x.y
-curl http://10.88.x.y:8080/            # từ host
+curl http://127.0.0.1:8080/            # từ host (qua DNAT)
+curl http://10.88.x.y:80/              # từ host (trực tiếp subnet)
 ```
 
-Hạn chế đã biết: **không NAT, không DNS** (container chỉ tới subnet 10.88/16 trừ khi host route/forward);
-**không bind được port < 1024** (mapped root thiếu `CAP_NET_BIND_SERVICE`) → dùng 8080+.
+Hạn chế đã biết: **port < 1024** không bind được trong container (mapped root thiếu `CAP_NET_BIND_SERVICE`)
+→ dùng 8080+; UDP port mapping chưa hỗ trợ; NAT yêu cầu `iptables` trên box.
 
 ### 5.7. `exec <id> <cmd...>`
 

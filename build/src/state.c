@@ -165,15 +165,22 @@ int do_ps(int json) {
 /* stop <id>: TERM ca cgroup, cho timeout, KILL neu con sot, don cgroup/watchdog */
 int do_stop(const char *id, int timeout) {
 	char dir[256], f[PATH_MAX + 16];
-	char cg[PATH_MAX] = "", rootfs[PATH_MAX] = "", wdbuf[64] = "";
+	char cg[PATH_MAX] = "", rootfs[PATH_MAX] = "", wdbuf[64] = "", ipbuf[64] = "", pubbuf[512] = "";
+	int pid = 0;
 	snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
 	snprintf(f, sizeof f, "%s/cgdir", dir);
 	if (read_small(f, cg, sizeof cg) < 0) {
 		fprintf(stderr, "khong co container '%s'\n", id);
 		return 1;
 	}
+	snprintf(f, sizeof f, "%s/pid", dir);
+	{ char pb[64]; if (read_small(f, pb, sizeof pb) == 0) pid = atoi(pb); }
 	snprintf(f, sizeof f, "%s/rootfs", dir);
 	read_small(f, rootfs, sizeof rootfs);
+	snprintf(f, sizeof f, "%s/ip", dir);
+	read_small(f, ipbuf, sizeof ipbuf);
+	snprintf(f, sizeof f, "%s/publish", dir);
+	read_small(f, pubbuf, sizeof pubbuf);
 	snprintf(f, sizeof f, "%s/watchdog", dir);
 	int wd = (read_small(f, wdbuf, sizeof wdbuf) == 0) ? atoi(wdbuf) : 0;
 
@@ -203,6 +210,21 @@ int do_stop(const char *id, int timeout) {
 		snprintf(o, sizeof o, "%s/.oldroot", rootfs);
 		rmdir(o);
 	}
+	if (ipbuf[0] && pid > 0) {
+		/* bridge container: don NAT + veth. */
+		if (pubbuf[0]) {
+			/* parse space-joined specs into a NULL-terminated array */
+			static char *pubs[16];
+			int np = 0;
+			char *tok = strtok(pubbuf, " ");
+			while (tok && np < 15) { pubs[np++] = tok; tok = strtok(NULL, " "); }
+			pubs[np] = NULL;
+			bridge_set_publishes(pubs, np);
+		} else {
+			bridge_set_publishes(NULL, 0);
+		}
+		bridge_teardown(pid);
+	}
 	if (wd > 1) kill(wd, SIGTERM);
 	snprintf(f, sizeof f, "%s/watchdog", dir);
 	unlink(f);
@@ -213,6 +235,7 @@ int do_stop(const char *id, int timeout) {
 int do_rm(const char *id, int force) {
 	char dir[256], f[PATH_MAX + 16], buf[256];
 	char cg[PATH_MAX] = "", rootfs[PATH_MAX] = "", wdbuf[64] = "";
+	char ipbuf[64] = "", pubbuf[512] = "";
 	snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
 	snprintf(f, sizeof f, "%s/pid", dir);
 	if (read_small(f, buf, sizeof buf) < 0) {
@@ -221,7 +244,17 @@ int do_rm(const char *id, int force) {
 	}
 	int pid = atoi(buf);
 	snprintf(f, sizeof f, "/proc/%d/cmdline", pid);
+	int alive = 0;
 	if (access(f, F_OK) == 0) {
+		char st[256], *sp;
+		snprintf(f, sizeof f, "/proc/%d/stat", pid);
+		if (read_small(f, st, sizeof st) == 0 && (sp = strchr(st, ')')) && sp[2]) {
+			if (sp[2] != 'Z') alive = 1;
+		} else {
+			alive = 1;
+		}
+	}
+	if (alive) {
 		if (!force) {
 			fprintf(stderr, "'%s' dang chay — stop truoc hoac rm -f\n", id);
 			return 1;
@@ -233,6 +266,10 @@ int do_rm(const char *id, int force) {
 	read_small(f, cg, sizeof cg);
 	snprintf(f, sizeof f, "%s/rootfs", dir);
 	read_small(f, rootfs, sizeof rootfs);
+	snprintf(f, sizeof f, "%s/ip", dir);
+	read_small(f, ipbuf, sizeof ipbuf);
+	snprintf(f, sizeof f, "%s/publish", dir);
+	read_small(f, pubbuf, sizeof pubbuf);
 	snprintf(f, sizeof f, "%s/watchdog", dir);
 	int wd = (read_small(f, wdbuf, sizeof wdbuf) == 0) ? atoi(wdbuf) : 0;
 
@@ -250,6 +287,21 @@ int do_rm(const char *id, int force) {
 		snprintf(o, sizeof o, "%s/.oldroot", rootfs);
 		rmdir(o);
 	}
+	if (ipbuf[0] && pid > 0) {
+		/* bridge container: don NAT + veth. */
+		if (pubbuf[0]) {
+			/* parse space-joined specs into a NULL-terminated array */
+			static char *pubs[16];
+			int np = 0;
+			char *tok = strtok(pubbuf, " ");
+			while (tok && np < 15) { pubs[np++] = tok; tok = strtok(NULL, " "); }
+			pubs[np] = NULL;
+			bridge_set_publishes(pubs, np);
+		} else {
+			bridge_set_publishes(NULL, 0);
+		}
+		bridge_teardown(pid);
+	}
 	if (wd > 1) kill(wd, SIGTERM);
 
 	snprintf(f, sizeof f, "%s/pid", dir); unlink(f);
@@ -257,6 +309,7 @@ int do_rm(const char *id, int force) {
 	snprintf(f, sizeof f, "%s/cmd", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/rootfs", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/ip", dir); unlink(f);
+	snprintf(f, sizeof f, "%s/publish", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/watchdog", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
 	snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);

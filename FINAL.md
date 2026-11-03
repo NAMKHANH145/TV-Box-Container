@@ -81,7 +81,7 @@ Amlogic S905W (1.8 GB RAM, kernel 6.18.38-meson64), `test.sh` **74/74 PASS** tr�
 | `ns.c` | 218 | thân tiến trình con: mount private, chroot/chdir, `/proc`, `/dev`, `--read-only`, uid_map |
 | `run.c` | 225 | supervisor: clone → pipe “go” → attach cgroup → wait/detach, watchdog disk/health, forward tín hiệu (handler chỉ `kill`) |
 | `exec.c` | 124 | `setns()` user→net/uts/ipc→mnt→pid, `O_PATH /proc/<pid>/root`, fork, seccomp, attach cgroup |
-| `bridge.c` | 159 | tạo `mcbr0`, veth, `netns_lo_up()`, cấu hình `eth0`/route bằng ioctl trong netns |
+| `bridge.c` | ~260 | tạo `mcbr0`, veth, NAT (masquerade) + DNS + `--publish` (DNAT), cấu hình `eth0`/route bằng ioctl trong netns; don dep khi stop/rm |
 | `cgroup.c` | 104 | tạo/bật controller v2, ghi trần, attach, đọc stat, dọn (`cgroup.kill` + retry rmdir) |
 | `disk.c` | 119 | `nftw` đếm dung lượng + `RLIMIT_FSIZE`; watchdog `--health-cmd` |
 | `seccomp.c` | 102 | BPF deny-list 21 syscall, `NO_NEW_PRIVS`, filter theo `__NR_*` (portable 4 arch) |

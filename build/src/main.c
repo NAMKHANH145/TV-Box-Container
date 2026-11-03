@@ -1,7 +1,7 @@
 /* main.c — dispatch lenh: run/ps/stats/stop/rm/oci-run */
 #include "common.h"
 
-#define VERSION "1.5.0"
+#define VERSION "1.5.1"
 
 #if defined(__aarch64__)
 #define MC_ARCH "aarch64"
