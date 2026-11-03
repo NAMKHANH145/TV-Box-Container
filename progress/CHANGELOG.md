@@ -3,6 +3,7 @@
 ## [1.5.1] - 2026-11-03
 
 ### Added
+- **Seccomp allow-list mode** (`--seccomp=strict`): ~120 syscall allow-list (Docker default profile subset) với `#ifdef __NR_*` guard cho 4 arch. Default vẫn deny-list (backward compat); `--seccomp=off` tắt filter. Đã test strict mode trên box: basic, wget outbound, exec, read-only, pipe, tar pass.
 - **Bridge NAT / DNS / port mapping** (`bridge.c`, `run.c`, `cli.c`, `common.h`, `state.c`):
   - `--net=bridge` giờ có NAT masquerade (container ra Internet) + DNS mặc định (8.8.8.8 / 1.1.1.1
     ghi vào rootfs `/etc/resolv.conf` khi không phải `--read-only`) + `--publish HOST:CONTAINER` / `-p`
@@ -12,6 +13,7 @@
   - State dir lưu `ip` + `publish` để `stop`/`rm` (process khác) don dung port.
 - Self-hosted runner `tvbox-s905w` (aarch64) trên TV Box; job CI `hardware-test` chạy `test.sh` (84/84)
   trên phần cứng thật mỗi push `main`/tag.
+- Community: `CONTRIBUTING.md`, `CODE_OF_CONDUCT.md`, issue/PR templates.
 - `--publish`/`-p` trong `print_usage`.
 
 ### Fixed

@@ -438,7 +438,7 @@ dù chỉ ~2.200 dòng C. Không cạnh tranh OCI đầy đủ (không chạy im
 - Không registry/layer/overlay; không image format chuẩn (profile tar là thay thế gần nhất).
 - ~~`--net=bridge` không NAT/DNS/port-mapping~~ → **đã có** v1.5.1: masquerade + DNS mặc định + `--publish`/`-p` (DNAT TCP). Còn thiếu: UDP publish, IPv6.
 - Không bind port < 1024 trong container.
-- Deny-list seccomp (không phải allow-list) — xem §11.1; không `/sys` (kernel cấm sysfs trong userns).
+- Seccomp: deny-list mặc định (21 syscall) + `--seccomp=strict` allow-list (~120 syscall, v1.5.1); không `/sys` (kernel cấm sysfs trong userns).
 - Không volumes/bind-mount tuỳ ý, không log driver (stdout → state dir khi `-d`).
 - Không checkpoint/restore, không live-migrate, không SELinux/AppArmor.
 - `--disk` là watchdog 1 s, không phải quota kernel.
@@ -463,14 +463,11 @@ Ba gap reviewer sẽ flag, kèm hướng xử lý và chi phí:
    - Chi phí: ~30–60 phút CI/run, image ~200 MB/arch. Khả thi nhưng chưa cần cho đồ án.
    - Trạng thái: **documented limitation**, không chặn công bố.
 
-2. **Seccomp allow-list (thay deny-list 21 syscall).**
-   Allow-list an toàn hơn nhưng phải enumerate toàn bộ syscall mà runtime dùng trong setup + exec
-   (mount, clone, setns, ioctl, write, read, ... ~60 syscall) và test trên 4 arch × 2 kernel.
-   - Hướng: bắt đầu từ `strace -c` của một run thật để lấy danh sách, rồi chuyển sang allow-list
-     với `--seccomp=strict` opt-in, giữ deny-list làm mặc định.
-   - Chi phí: 2–3 ngày, rủi ro regression cao. Khuyến nghị làm sau khi có test matrix multi-arch.
-   - Trạng thái: **documented limitation**; deny-list hiện tại chặn được `bomb`/`breakout`/`mount`/
-     `ptrace`/`open_by_handle_at`.
+2. **Seccomp allow-list.** ✅ **đã implement** v1.5.1: `--seccomp=strict` dùng allow-list
+   ~120 syscall (Docker default profile subset). Đã test strict mode trên box: basic, wget outbound,
+   exec, read-only, pipe, tar đều pass. Deny-list vẫn là mặc định (backward compat).
+   - Còn lại: test strict mode trên 4 arch; mở rộng danh sách nếu workload mới fail.
+   - Trạng thái: **implement xong**, experimental.
 
 3. **Community / contributing (single maintainer).**
    - Đã thêm: `CONTRIBUTING.md`, `.github/ISSUE_TEMPLATE/bug_report.md`,

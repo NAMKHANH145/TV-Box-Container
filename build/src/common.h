@@ -45,6 +45,7 @@ struct cfg {
 	const char *net;
 	const char *hostname;
 	char **cmd;
+	int seccomp_mode;   /* 0=default deny-list, 1=strict allow-list, 2=off */
 	char **publish;      /* "hostport:containerport", NULL-terminated */
 	int npublish;
 };
@@ -72,6 +73,7 @@ int try_write_file(const char *path, const char *val);
 void write_file(const char *path, const char *val);
 int read_small(const char *path, char *buf, size_t n);
 void install_filter (void);
+void install_filter_strict(void);
 
 int child_fn(void *arg);
 void userns_map(pid_t child);

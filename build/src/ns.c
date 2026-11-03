@@ -200,7 +200,9 @@ int child_fn(void *arg) {
 	}
 
 	/* Khoa syscall nguy hiem SAU setup, TRUOC execvp */
-	install_filter();
+	if (c->seccomp_mode == 1) install_filter_strict();
+	else if (c->seccomp_mode == 0) install_filter();
+	/* mode 2 (off): khong cai filter */
 
 	execvp(c->cmd[0], c->cmd);
 	die("execvp");
