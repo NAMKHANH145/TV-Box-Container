@@ -1,13 +1,16 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
-## 0. Verify v1.5.3 current aarch64 build — 2026-11-12
+## 0. Verify v1.5.4 current aarch64 build — 2026-11-12
 
-- Binary deployed: `minicontainer 1.5.3 (aarch64, musl, static)`, 169,496 B.
-- SHA256: `630dfd7a1288df5b87ab4cced03caaa4415f4e01c0cf4156928f1ef0344c51af`
-  (v1.5.2 cùng mã nguồn: `910010d9…`; bản cũ trên box là `33401a9a…`; log trước ghi `9e1d1b9e…`).
+- Binary deployed: `minicontainer 1.5.4 (aarch64, musl, static)`, 169,496 B.
+- SHA256: `ed29de67c984d193548ab1923c1e81ebfba4edf146d76a64a468ef46f8550b27`
+  (v1.5.3 `630dfd7a…`; v1.5.2 `910010d9…`; bản cũ trên box `33401a9a…`; log trước ghi `9e1d1b9e…`).
 - Hardware: S905W, aarch64, kernel `6.18.38-meson64`, cgroup v2.
 - Full `build/test.sh` trên box, chạy **riêng** (không có soak đồng thời):
-  **84/84 PASS, 0 FAIL, 0 SKIP** (log `/root/test-v153.log`).
+  **84/84 PASS, 0 FAIL, 0 SKIP** (log `/root/test-v154.log`).
+- `--seccomp=strict`: `/bin/sh`, `fork`, ghi file, `ls` chạy được; `mount` bị chặn (rc 1).
+  Allow-list 201 syscall sau khi sửa generator (trước đó thiếu `mmap`/`fcntl`/`newfstatat`
+  nên `/bin/sh` báo "out of memory").
 - Measured `--io 1M`: **3092 ms** for 3 MB; CPU cap **~20 %**; T7 latency **67 ms**.
 - Bridge: host-to-container ping, container-to-container ping, veth tự dọn: PASS.
 - Churn sau khi sửa cleanup: 40 vòng bridge (`run -d → exec → stop → rm`) + 60 vòng hỗn hợp

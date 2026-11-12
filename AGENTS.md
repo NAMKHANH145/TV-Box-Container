@@ -2,7 +2,7 @@
 
 > Đọc file này trước khi làm bất cứ gì. Đây là dự án container runtime zero-daemon bằng C cho
 > TV Box Amlogic S905W (aarch64, 1.8 GB RAM, Ubuntu 26.04, kernel `6.18.38-meson64`).
-> Trạng thái: **v1.5.3** (tag `v1.5.3` đã phát hành) · `test.sh` **84 case** (84/84 PASS trên phần
+> Trạng thái: **v1.5.4** (tag `v1.5.4` đã phát hành) · `test.sh` **84 case** (84/84 PASS trên phần
 > cứng thật, 2026-11-12) · nhánh `main` đã push.
 
 ## 1. Thứ tự đọc (khoảng 25 phút)
@@ -94,7 +94,8 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 1. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
 2. `bash test.sh` trên box (kỳ vọng `TONG=84`), rồi Ctrl-C 20 lần liền để kiểm đường dọn dẹp mới.
    **Không chạy test.sh đồng thời với soak.sh** (assertion cleanup là toàn cục, sẽ FAIL oan).
-3. Tag `v1.5.3` đã xong 2026-11-12 (84/84, soak 6000). Lần release sau: `bash build/release.sh` rồi tag.
+3. Tag `v1.5.4` đã xong 2026-11-12 (84/84, soak 6000). Lần release sau: `bash build/release.sh` rồi tag.
+   Lưu ý: `v1.5.3` có CI build đỏ (trùng `install_filter_strict`) — dùng `v1.5.4` trở đi.
 4. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local); asset mới có kèm
    `smoke-sdk.sh` nên mỗi arch tự kiểm được `sdk` mà không cần root.
 5. Self-hosted runner aarch64 chạy `test.sh` trước release.

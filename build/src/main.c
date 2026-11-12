@@ -2,7 +2,7 @@
 #include "common.h"
 #include <sys/prctl.h>
 
-#define VERSION "1.5.3"
+#define VERSION "1.5.4"
 
 #if defined(__aarch64__)
 #define MC_ARCH "aarch64"

@@ -104,7 +104,11 @@ void install_filter(void) {
 	if (prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &p)) die("seccomp");
 }
 
-/* Strict allow-list filter — generated at build time by generate_seccomp.py */
+/* Strict allow-list filter — generated at build time by generate_seccomp.py.
+ * The macro makes the included file emit the definition; compiled standalone
+ * (e.g. CI compiling the whole src directory) it emits nothing, avoiding a
+ * duplicate symbol. */
+#define MC_SECCOMP_STRICT_INCLUDED 1
 #if defined(__aarch64__)
 #include "seccomp_strict_aarch64.c"
 #elif defined(__x86_64__)
