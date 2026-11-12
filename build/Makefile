@@ -8,12 +8,48 @@ CC := $(TOOLCHAIN)gcc
 endif
 STRIP ?= $(TOOLCHAIN)strip
 CFLAGS ?= -static -O2 -Wall
-SRC = $(wildcard src/*.c)
+SRC = $(filter-out src/seccomp_strict_%.c,$(wildcard src/*.c))
 OUT = minicontainer
+
+# Detect target architecture from compiler (for seccomp filter generation)
+# Cross-compile: aarch64-linux-musl-gcc -> aarch64
+# Native: gcc -> x86_64 (or whatever host is)
+TARGET_ARCH := $(shell $(CC) -dumpmachine 2>/dev/null | cut -d- -f1)
+ifeq ($(TARGET_ARCH),)
+    TARGET_ARCH := $(shell uname -m)
+endif
+
+# Map compiler architecture to our seccomp architecture names
+SECCOMP_ARCH := $(TARGET_ARCH)
+ifeq ($(TARGET_ARCH),aarch64)
+    SECCOMP_ARCH := aarch64
+endif
+ifeq ($(TARGET_ARCH),x86_64)
+    SECCOMP_ARCH := x86_64
+endif
+ifeq ($(TARGET_ARCH),arm)
+    SECCOMP_ARCH := arm
+endif
+ifeq ($(TARGET_ARCH),riscv64)
+    SECCOMP_ARCH := riscv64
+endif
+ifeq ($(TARGET_ARCH),i386)
+    SECCOMP_ARCH := i386
+endif
+ifeq ($(TARGET_ARCH),i686)
+    SECCOMP_ARCH := i386
+endif
+
+# Generated strict seccomp filter file
+SECCOMP_STRICT_SRC := src/seccomp_strict_$(SECCOMP_ARCH).c
 
 all: $(OUT)
 
-$(OUT): $(SRC) src/common.h
+# Generate strict seccomp filter before building
+$(SECCOMP_STRICT_SRC): generate_seccomp.py
+	python3 generate_seccomp.py $(SECCOMP_ARCH) $(SECCOMP_STRICT_SRC)
+
+$(OUT): $(SRC) src/common.h $(SECCOMP_STRICT_SRC)
 	$(CC) $(CFLAGS) -o $@ $(SRC)
 	$(STRIP) $@
 	ls -la $@
@@ -31,7 +67,10 @@ deploy: $(OUT)
 	sshpass -p "$(SSHPASS)" scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $(OUT) root@$(BOX):/usr/local/bin/; \
 	else scp -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null $(OUT) root@$(BOX):/usr/local/bin/; fi
 
-clean:
-	rm -f $(OUT) bomb breakout
+# Regenerate seccomp filter for current target
+seccomp-gen: $(SECCOMP_STRICT_SRC)
 
-.PHONY: all tools deploy clean
+clean:
+	rm -f $(OUT) bomb breakout $(SECCOMP_STRICT_SRC)
+
+.PHONY: all tools deploy clean seccomp-gen
