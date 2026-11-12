@@ -1,12 +1,13 @@
 #!/bin/bash
 # Tầng 2: Performance benchmark
-MC=minicontainer
-BR=/opt/rootfs
+SCRIPT_DIR=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
+MC=${MC:-$SCRIPT_DIR/minicontainer}
+BR=${BR:-/opt/rootfs}
 
 echo "=== B1: Start latency (1000 iterations) ==="
 T0=$(date +%s%N)
 for i in $(seq 1 1000); do
-    minicontainer run --rootfs $BR /bin/true >/dev/null 2>&1
+    "$MC" run --rootfs "$BR" /bin/true >/dev/null 2>&1
 done
 T1=$(date +%s%N)
 TOTAL_US=$(( (T1 - T0) / 1000 ))
@@ -16,7 +17,7 @@ echo "Average: $(( TOTAL_US / 1000 ))us per run"
 echo "=== B2: p50/p99 Percentile Analysis ==="
 for i in $(seq 1 1000); do
     T0=$(date +%s%N)
-    minicontainer run --rootfs $BR /bin/true >/dev/null 2>&1
+    "$MC" run --rootfs "$BR" /bin/true >/dev/null 2>&1
     T1=$(date +%s%N)
     echo $(( (T1 - T0) / 1000000 ))
 done > /tmp/latency.txt
@@ -37,17 +38,17 @@ echo "minicontainer RSS when idle: ${RSS:-0}KB"
 
 rm -f /tmp/latency.txt /tmp/sorted.txt
 echo "=== B4: IO throttle (5MB @ 1MB/s) ==="
-time minicontainer run --io 1M --rootfs $BR /bin/dd if=/dev/zero of=/tmp/t bs=1M count=5 oflag=direct >/dev/null 2>&1
-rm -f /opt/rootfs/tmp/t /tmp/t
+time "$MC" run --io 1M --rootfs "$BR" /bin/dd if=/dev/zero of=/tmp/t bs=1M count=5 oflag=direct >/dev/null 2>&1
+rm -f "$BR/tmp/t" /tmp/t
 
 echo "=== B5: Churn 100 cycles ==="
 FAIL_COUNT=0
 T0=$(date +%s%N)
 for i in $(seq 1 100); do
     ID="churn_$i"
-    $MC run -d --name "$ID" --rootfs $BR /bin/sleep 1 >/dev/null 2>&1 || FAIL_COUNT=$((FAIL_COUNT+1))
-    $MC stop "$ID" >/dev/null 2>&1
-    $MC rm "$ID" >/dev/null 2>&1
+    "$MC" run -d --name "$ID" --rootfs "$BR" /bin/sleep 1 >/dev/null 2>&1 || FAIL_COUNT=$((FAIL_COUNT+1))
+    "$MC" stop "$ID" >/dev/null 2>&1
+    "$MC" rm "$ID" >/dev/null 2>&1
 done
 T1=$(date +%s%N)
 TOTAL_US=$(( (T1 - T0) / 1000 ))
@@ -60,6 +61,6 @@ mkdir -p /tmp/oci-test/rootfs
 cp -a $BR/* /tmp/oci-test/rootfs 2>/dev/null
 chmod 1777 /tmp/oci-test/rootfs/tmp 2>/dev/null
 echo '{"ociVersion":"1.0.0","hostname":"perf-test","process":{"args":["/bin/echo","OCI_OK"]},"root":{"path":"rootfs"},"linux":{"resources":{"memory":{"limit":31457280}}}}' > /tmp/oci-test/config.json
-$MC oci-run /tmp/oci-test
+    "$MC" oci-run /tmp/oci-test
 rm -rf /tmp/oci-test
 echo "=== DONE ==="

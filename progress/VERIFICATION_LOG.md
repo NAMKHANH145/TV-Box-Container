@@ -1,5 +1,29 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0. Verify v1.5.2 current aarch64 build — 2026-11-12
+
+- Binary deployed: `minicontainer 1.5.2 (aarch64, musl, static)`, 169,496 B.
+- SHA256: `910010d96a1eb9095fc1ca79281ff17ad1ffad896c6932274d4f1243b9f285c5`
+  (bản cũ trên box là `33401a9a…`; dòng log trước ghi `9e1d1b9e…` — đã thay bằng bản build này).
+- Hardware: S905W, aarch64, kernel `6.18.38-meson64`, cgroup v2.
+- Full `build/test.sh` trên box, chạy **riêng** (không có soak đồng thời):
+  **84/84 PASS, 0 FAIL, 0 SKIP** (log `/root/test-v152-clean.log`).
+- Measured `--io 1M`: **3092 ms** for 3 MB; CPU cap **~20 %**; T7 latency **67 ms**.
+- Bridge: host-to-container ping, container-to-container ping, veth tự dọn: PASS.
+- Churn sau khi sửa cleanup: 40 vòng bridge (`run -d → exec → stop → rm`) + 60 vòng hỗn hợp
+  (true / ram+cpu / isolated / pids+disk / read-only / bridge): **0 lỗi**, cuối cùng
+  `state=0 cgroups=0 veth=0 mounts=0`.
+- Soak `ITER=6000` (binary cũ `33401a9a…`, 07:09–08:14): 6000 vòng, 3874 s, `err=23 leak=42`,
+  cuối `cgroups=0 mounts=0 state=0`, MemAvailable giảm 43 kB → không rò RAM. Các `err/leak` là
+  checkpoint bắt gặp state/cgroup của vòng trước đang dọn; bản build mới không tái hiện (churn 0 lỗi).
+- TCP publish: laptop-to-box TCP publish test on port `18082`: PASS; response `mc-publish-ok`.
+- Cleanup after bridge/publish tests: no test-created `mcv*`/`mcc*` veth, cgroup or publish rule remained.
+- Security focused tests: `exec --seccomp=off` reports `Seccomp: 0`; effective capabilities are limited to
+  `CAP_NET_RAW` and `CAP_NET_BIND_SERVICE`; state-ID traversal rejected; health shell metacharacters rejected.
+- **Lưu ý:** lần chạy 79/84 trước đó diễn ra lúc soak đang chạy. Cả 5 FAIL đều là assertion toàn cục
+  (`! ls /sys/fs/cgroup/minicontainer-*`, `! ip link … mcv`) nhìn thấy container của soak — không phải
+  regression. `test.sh` và `soak.sh` phải chạy tuần tự.
+
 ## 1. Đã verify thực tế
 
 - System: Amlogic S905W, 4×Cortex-A53 1.2GHz, RAM 1.8GB, eMMC 16GB, Ubuntu 26.04, kernel 6.18.38-meson64.

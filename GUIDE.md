@@ -330,7 +330,10 @@ lượng dưới rootfs mỗi giây (baseline + delta) và `cgroup.kill` khi vư
 
 ### 5.13. `--health-cmd`
 
-Chạy **trên host** bằng `system()` mỗi 5 s. Exit ≠ 0 → kill cgroup; detached ghi marker `health_failed`.
+Chạy **trên host** mỗi 5 s bằng `fork` + `exec` argv literal, **không qua shell**. Không dùng
+`;`, `&&`, `|`, `$()` hoặc redirection trong giá trị này; muốn chạy nhiều bước hãy tạo một
+script executable rồi truyền `sh /path/to/script`. Lệnh bị giới hạn thời gian; exit ≠ 0 hoặc
+timeout → kill cgroup; detached ghi marker `health_failed`.
 Muốn kiểm tra bên trong container thì dùng `exec` trong một script wrapper.
 
 ### 5.14. `sdk init` / `sdk pack` (đóng gói rootfs)
@@ -457,7 +460,7 @@ hoặc `memory.events` (`max` tăng) trong thư mục cgroup của container.
 
 - **Không** ghi IP/mật khẩu vào script, `Makefile`, hay commit — dùng `BOX=`, `SSHPASS_FILE=`, `MC_PULL_URL`.
 - `pull` chỉ xác thực khi có `--sha256`; nội dung tải từ mạng ngoài nên có checksum bạn tự publish.
-- `--health-cmd` là chuỗi shell chạy trên **host** với quyền của người gọi — chỉ đưa lệnh của chính bạn.
+- `--health-cmd` chạy trên **host** với quyền của người gọi bằng argv literal, không phải shell; chỉ đưa executable/script mà bạn tin cậy.
 - Container có 3 lớp: chroot (không thấy host fs) → userns (uid ngoài là `nobody`) → seccomp deny 21 syscall.
   Vẫn khuyến nghị chạy container không tin cậy với `--read-only` + `--ram` + `--pids` + `--disk`.
 - `--net=host` cho container quyền vào mạng thật của box: chỉ dùng cho workload do bạn kiểm soát.
