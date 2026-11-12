@@ -1,13 +1,13 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
-## 0. Verify v1.5.2 current aarch64 build — 2026-11-12
+## 0. Verify v1.5.3 current aarch64 build — 2026-11-12
 
-- Binary deployed: `minicontainer 1.5.2 (aarch64, musl, static)`, 169,496 B.
-- SHA256: `910010d96a1eb9095fc1ca79281ff17ad1ffad896c6932274d4f1243b9f285c5`
-  (bản cũ trên box là `33401a9a…`; dòng log trước ghi `9e1d1b9e…` — đã thay bằng bản build này).
+- Binary deployed: `minicontainer 1.5.3 (aarch64, musl, static)`, 169,496 B.
+- SHA256: `630dfd7a1288df5b87ab4cced03caaa4415f4e01c0cf4156928f1ef0344c51af`
+  (v1.5.2 cùng mã nguồn: `910010d9…`; bản cũ trên box là `33401a9a…`; log trước ghi `9e1d1b9e…`).
 - Hardware: S905W, aarch64, kernel `6.18.38-meson64`, cgroup v2.
 - Full `build/test.sh` trên box, chạy **riêng** (không có soak đồng thời):
-  **84/84 PASS, 0 FAIL, 0 SKIP** (log `/root/test-v152-clean.log`).
+  **84/84 PASS, 0 FAIL, 0 SKIP** (log `/root/test-v153.log`).
 - Measured `--io 1M`: **3092 ms** for 3 MB; CPU cap **~20 %**; T7 latency **67 ms**.
 - Bridge: host-to-container ping, container-to-container ping, veth tự dọn: PASS.
 - Churn sau khi sửa cleanup: 40 vòng bridge (`run -d → exec → stop → rm`) + 60 vòng hỗn hợp
