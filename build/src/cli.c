@@ -1,57 +1,95 @@
-/* cli.c — parse flags run (ca 2 dang --opt=value va --opt value) */
+/* cli.c — parse run flags (both --opt=value and --opt value) */
 #include "common.h"
+#include <getopt.h>
 
 /* print_usage is defined below */
 
-#define OPT1(name) (strcmp(argv[i], name) == 0 && i + 1 < argc && (val = argv[++i]))
-#define OPT2(name, pre) (strncmp(argv[i], pre, strlen(pre)) == 0 && (val = argv[i] + strlen(pre)))
+static const struct option run_options[] = {
+	{"ram", required_argument, NULL, 'r'},
+	{"cpu", required_argument, NULL, 'c'},
+	{"pids", required_argument, NULL, 'q'},
+	{"io", required_argument, NULL, 'i'},
+	{"disk", required_argument, NULL, 'k'},
+	{"name", required_argument, NULL, 'n'},
+	{"detach", no_argument, NULL, 'D'},
+	{"read-only", no_argument, NULL, 'R'},
+	{"seccomp", required_argument, NULL, 's'},
+	{"health-cmd", required_argument, NULL, 'h'},
+	{"rootfs", required_argument, NULL, 'o'},
+	{"net", required_argument, NULL, 'N'},
+	{"hostname", required_argument, NULL, 'H'},
+	{"publish", required_argument, NULL, 'p'},
+	{"help", no_argument, NULL, 1},
+	{NULL, 0, NULL, 0}
+};
 
-/* Gia tri so bat buoc hop le: tranh "--ram=abc" bi bo qua im lang (-1 = unset). */
+/* Numeric value must be valid: reject "--ram=abc" silently ignored (-1 = unset). */
 static long need_bytes(const char *opt, const char *val) {
 	long v = parse_bytes(val);
 	if (v <= 0) {
-		fprintf(stderr, "minicontainer: %s: gia tri khong hop le '%s'\n", opt, val ? val : "");
+		fprintf(stderr, "minicontainer: %s: invalid value '%s'\n", opt, val ? val : "");
 		exit(1);
 	}
 	return v;
 }
 
 void parse_args(int argc, char **argv, struct cfg *cf) {
-	int i = 1;
-	if (argc > 1 && strcmp(argv[1], "run") == 0) i = 2;
-	const char *val = NULL;
-	for (; i < argc; i++) {
-		val = NULL;
-		if (OPT1("--ram") || OPT2("--ram", "--ram=")) cf->ram = need_bytes("--ram", val);
-		else if (OPT1("--cpu") || OPT2("--cpu", "--cpu=")) cf->cpu = (int)need_bytes("--cpu", val);
-		else if (OPT1("--pids") || OPT2("--pids", "--pids=")) cf->pids = need_bytes("--pids", val);
-		else if (OPT1("--io") || OPT2("--io", "--io=")) cf->io = need_bytes("--io", val);
-		else if (OPT1("--disk") || OPT2("--disk", "--disk=")) cf->max_disk = need_bytes("--disk", val);
-		else if (OPT1("--name") || OPT2("--name", "--name=")) cf->name = val;
-		else if (strcmp(argv[i], "-d") == 0 || strcmp(argv[i], "--detach") == 0) cf->detach = 1;
-		else if (strcmp(argv[i], "--read-only") == 0) cf->read_only = 1;
-		else if (OPT1("--seccomp") || OPT2("--seccomp", "--seccomp=")) {
-			if (strcmp(val, "strict") == 0) cf->seccomp_mode = 1;
-			else if (strcmp(val, "off") == 0) cf->seccomp_mode = 2;
-			else if (strcmp(val, "default") == 0) cf->seccomp_mode = 0;
-			else { fprintf(stderr, "minicontainer: --seccomp chi duoc default, strict hoac off\n"); exit(1); }
+	int opt;
+	int option_index = 0;
+	const char *prog = argv[0];
+
+	/* Skip "run" subcommand if present */
+	if (argc > 1 && strcmp(argv[1], "run") == 0) {
+		argc--;
+		argv++;
+	}
+
+	/* Reset getopt */
+	optind = 1;
+
+	while ((opt = getopt_long(argc, argv, "+r:c:i:k:n:dDRs:h:o:N:H:P:p:", run_options, &option_index)) != -1) {
+		switch (opt) {
+			case 'r': cf->ram = need_bytes("--ram", optarg); break;
+			case 'c': cf->cpu = (int)need_bytes("--cpu", optarg); break;
+			case 'q': cf->pids = need_bytes("--pids", optarg); break;
+			case 'i': cf->io = need_bytes("--io", optarg); break;
+			case 'k': cf->max_disk = need_bytes("--disk", optarg); break;
+			case 'd': cf->detach = 1; break;
+			case 'n': cf->name = optarg; break;
+			case 'D': cf->detach = 1; break;
+			case 'R': cf->read_only = 1; break;
+			case 's':
+				if (strcmp(optarg, "strict") == 0) cf->seccomp_mode = 1;
+				else if (strcmp(optarg, "off") == 0) cf->seccomp_mode = 2;
+				else if (strcmp(optarg, "default") == 0) cf->seccomp_mode = 0;
+				else { fprintf(stderr, "minicontainer: --seccomp must be default, strict, or off\n"); exit(1); }
+				break;
+			case 'h': cf->health_cmd = optarg; break;
+			case 'o': cf->rootfs = optarg; break;
+			case 'N': cf->net = optarg; break;
+			case 'H': cf->hostname = optarg; break;
+			case 'p':
+			case 'P':
+				cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
+				cf->publish[cf->npublish++] = (char *)optarg;
+				cf->publish[cf->npublish] = NULL;
+				break;
+			case 1:
+				print_usage(prog);
+				exit(0);
+			case '?':
+				fprintf(stderr, "minicontainer: unknown option or missing argument\n");
+				print_usage(prog);
+				exit(1);
+			default:
+				/* Unknown option or missing argument */
+				exit(1);
 		}
-		else if (OPT1("--health-cmd") || OPT2("--health-cmd", "--health-cmd=")) cf->health_cmd = val;
-		else if (OPT1("--rootfs") || OPT2("--rootfs", "--rootfs=")) cf->rootfs = val;
-		else if (OPT1("--net") || OPT2("--net", "--net=")) cf->net = val;
-		else if (OPT1("--hostname") || OPT2("--hostname", "--hostname=")) cf->hostname = val;
-		else if (strcmp(argv[i], "-p") == 0 && i + 1 < argc) {
-			cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
-			cf->publish[cf->npublish++] = (char *)argv[++i];
-			cf->publish[cf->npublish] = NULL;
-		}
-		else if (OPT2("--publish", "--publish=")) {
-			cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
-			cf->publish[cf->npublish++] = (char *)val;
-			cf->publish[cf->npublish] = NULL;
-		}
-		else if (strcmp(argv[i], "--") == 0) { cf->cmd = &argv[++i]; break; }
-		else { cf->cmd = &argv[i]; break; }
+	}
+
+	/* Remaining arguments are the command */
+	if (optind < argc) {
+		cf->cmd = &argv[optind];
 	}
 }
 

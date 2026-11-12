@@ -7,10 +7,13 @@
 int main() {
     mkdir("/tmp/bb", 0755);
     if (chroot("/tmp/bb") < 0) { printf("chroot bi chan: %s (tot)\n", strerror(errno)); return 2; }
-    for (int i = 0; i < 50; i++) chdir("..");
+    for (int i = 0; i < 50; i++)
+        if (chdir("..") < 0) break;
     if (chroot(".") < 0) { printf("re-chroot bi chan: %s (tot)\n", strerror(errno)); return 2; }
     FILE *f = fopen("/HOST_MARKER", "r");
     if (!f) { printf("KHONG thoat duoc (tot): %s\n", strerror(errno)); return 1; }
-    char b[64]; fgets(b, sizeof b, f); fclose(f);
+    char b[64] = {0};
+    if (!fgets(b, sizeof b, f)) { fclose(f); return 1; }
+    fclose(f);
     printf("THOAT DUOC RA HOST! marker=%s", b); return 0;
 }
