@@ -175,6 +175,11 @@ void namespace_chroot(const char *rootfs) {
 }
 
 void namespace_mount_proc(void) {
+    /* Best effort: the host-side prep already made it; a --read-only rootfs
+     * makes this fail with EROFS/EACCES and the mount below reports properly. */
+    if (mkdir("/proc", 0555) < 0 && errno != EEXIST && errno != EACCES &&
+        errno != EPERM && errno != EROFS)
+        die("mkdir /proc");
     if (mount("proc", "/proc", "proc", 0, NULL) < 0) {
         if (errno != EBUSY) die("mount /proc");
     }
@@ -247,6 +252,14 @@ static int mkdir_in_root(const char *rootfs, const char *dst, mode_t mode) {
  * root-owned rootfs cannot be created by the mapped-root child. Also makes
  * sure /etc/hosts exists so the child can bind its generated file over it. */
 int namespace_prepare_filesystem(struct cfg *c) {
+    /* /proc is a mount point, not something every image ships (busybox:latest
+     * has none). Create it here, as the host-root parent: the child runs as
+     * the mapped root (uid 0 -> 65534) and cannot mkdir inside a root-owned
+     * image rootfs. */
+    if (mkdir_in_root(c->rootfs, "/proc", 0555) < 0) {
+        fprintf(stderr, "minicontainer: cannot create /proc mount point: %s\n", strerror(errno));
+        return -1;
+    }
     for (int i = 0; i < c->nmounts; i++) {
         char buf[PATH_MAX * 3], *type, *src, *dst, *opts;
         if (spec_split(c->mounts[i], buf, sizeof buf, &type, &src, &dst, &opts) < 0) {

@@ -944,3 +944,118 @@ Mỗi recipe: `pull` image gốc → `build` từ `recipes/<tên>/Dockerfile` �
 - Reset thật qua `/dev/watchdog`, 5 lần reboot sạch, p50 latency, corpus 6 image, soak 24 h.
 - 3 asset musl còn lại (armv7l, riscv64, x86_64-musl) chưa chạy trên phần cứng tương ứng.
 - CI GitHub (`build.yml` 4 arch + smoke-sdk) chưa chạy lại sau các sửa trên.
+
+## v2.0.0 — Ship 2 chiều giữa laptop và TV Box + DoD §0.1 (2026-11-17, phiên 2)
+
+Binary dùng cho toàn bộ mục này (sau khi sửa mountpoint `/proc`):
+
+| Arch | Kích thước | sha256 | `--version` |
+|---|---|---|---|
+| x86_64 glibc static (laptop) | **1.197.584 B** | `5fc9539e305b9f784dca1dd615cde87e5ff38ae412052b7aa84a26bace97ff96` | `minicontainer 2.0.0 (x86_64, glibc, static)` |
+| aarch64 musl (box) | **284.208 B** | `57663651ca3ea4bebf77c56902df06d147451a72b28e0de5224af3774c12f5be` | `minicontainer 2.0.0 (aarch64, musl, static)` |
+
+### Ship microservice laptop → TV Box (cross-arch, giống `docker buildx` + `save`/`load`)
+
+Dịch vụ thử: `task-svc` (`/tmp/tasksvc`, Python stdlib) — `GET /task?n=` đếm số nguyên tố và trả
+`hostname / arch / kernel / pid` của máy **thực sự chạy job**.
+
+```bash
+# 1. laptop: base aarch64 + build cho arch của box (không cần qemu vì Dockerfile chỉ FROM/COPY/CMD)
+minicontainer pull --platform=linux/arm64 python:3.12-alpine
+minicontainer build --platform=linux/arm64 -t task-svc:1 /tmp/tasksvc
+#    -> build: task-svc:1 -> task-svc-1 (aarch64)
+minicontainer export task-svc-1 -o /tmp/task-svc-aarch64.tar.gz
+#    -> export: 55.9 MB rootfs, bundle 18.119.251 B, sha256 0a768055…
+
+# 2. scp 1 file sang box, import, run
+scp /tmp/task-svc-aarch64.tar.gz root@<IP_BOX>:/root/
+ssh root@<IP_BOX> 'minicontainer import /root/task-svc-aarch64.tar.gz \
+  && minicontainer run -d --name task-svc --image=task-svc-1 --ram=96M --net=bridge \
+       -p 8090:8090 python /app.py'
+
+# 3. laptop gọi qua LAN
+curl 'http://<IP_BOX>:8090/task?n=1000000'
+```
+
+Kết quả thật:
+
+```json
+{"job":"count_primes","n":1000000,"primes":78498,"ms":110.4,
+ "ran_on":{"hostname":"minicontainer-os","arch":"aarch64","kernel":"6.18.38-meson64","pid":1,
+           "host_uptime_s":7736.5,"container_uptime_s":1.6}}
+```
+
+→ job chạy **trên box** (aarch64, kernel meson64), laptop chỉ gửi HTTP.
+
+### Ship microservice TV Box → laptop (chiều ngược)
+
+```bash
+# trên box: base x86_64 + build cho arch laptop, rồi export
+minicontainer pull --platform=linux/amd64 python:3.12-alpine
+minicontainer build --platform=linux/amd64 -t task-svc-x86:1 /root/tasksvc   # -> (x86_64)
+minicontainer export task-svc-x86-1 -o /root/task-svc-x86_64.tar.gz
+#    -> bundle 17.742.242 B, sha256 b6c12e8bfe894a98…
+# scp về laptop, import, run
+minicontainer import /tmp/task-svc-x86_64.tar.gz
+minicontainer run -d --name task-svc-x86 --image=task-svc-x86-1 --ram=96M --net=bridge -p 8091:8090 python /app.py
+curl 'http://127.0.0.1:8091/task?n=1000000'
+```
+
+```json
+{"job":"count_primes","n":1000000,"primes":78498,"ms":10.7,
+ "ran_on":{"hostname":"minicontainer-os","arch":"x86_64","kernel":"6.8.0-124-generic","pid":1,
+           "host_uptime_s":41071.1,"container_uptime_s":4.8}}
+```
+
+→ cùng một Dockerfile, hai hướng ship, mỗi bên chạy **native** đúng arch của mình (110,4 ms trên
+box vs 10,7 ms trên laptop cho cùng 1.000.000 số).
+
+### DoD §0.1 — corpus 6 image + định danh + TCP (box)
+
+| Kiểm | Kết quả |
+|---|---|
+| `alpine:3.20` → `/etc/alpine-release` = `3.20.10` | PASS |
+| `busybox:latest` → chạy `sh` | PASS |
+| `redis:alpine` → `redis-server --version` | PASS |
+| `python:3.12-slim` → `print(6*7)` = 42 | PASS |
+| `node:20-slim` → `console.log(1+1)` = 2 | PASS |
+| `nginx:alpine` → `nginx -v` | PASS |
+| container A resolve tên `cwr` → IP 10.88.x (qua `/etc/hosts` của bridge) | PASS |
+| A → `cwr:6379` gửi `PING`, nhận `+PONG` (TCP thật) | PASS |
+| redis **không** lộ cổng 6379 ra host (không publish) | PASS |
+| `--user 0:0` chạy được | PASS |
+| `--user 1000:1000` bị từ chối kèm thông điệp `inside userns` | PASS (đúng thiết kế) |
+
+- `--user` khác 0 **không dùng được**: userns chỉ map 1 uid (`0 -> 65534`), nên `setuid(1000)`
+  trả `EINVAL`. Đây là giới hạn đã biết, không phải lỗi cấu hình.
+- Outbound từ bridge: `ping -c1 1.1.1.1` từ container `--net=bridge` → OK (MASQUERADE).
+
+### Lỗi thật thứ 7 (do corpus phát hiện): image thiếu `/proc`
+
+`busybox:latest` **không có thư mục `/proc`** trong rootfs → `mount("proc", "/proc", …)` trả `ENOENT`,
+container không khởi động được. Không thể `mkdir` trong lúc chạy container: process chạy bằng mapped
+root (uid 0 → host 65534) nên `mkdir` trong rootfs thuộc host-root trả `EACCES`.
+Sửa: tạo mountpoint `/proc` ở phía host trong `namespace_prepare_filesystem()` (chạy trước khi vào
+userns), và `mkdir` trong `namespace_mount_proc()` chỉ còn là best-effort (bỏ qua `EACCES/EPERM/EROFS`
+để `--read-only` vẫn báo lỗi đúng chỗ).
+
+### Tài nguyên & vòng đời (box S905W)
+
+- `run /bin/true` **p50 = 61 ms** (min 52, max 79, n=21) — mục tiêu ≤ 80 ms, ngưỡng đỏ 100 ms.
+- Idle: `ps` rỗng, **0** cgroup `minicontainer-*` còn lại, không daemon → 0 MB RAM thường trú.
+- **Reboot**: tạo trước 2 container (1 cái `-p 8088:80` để sinh rule iptables) rồi `reboot`
+  không dọn. Sau reboot (SSH lên lại sau ~20 s):
+  `cgroup rác 0 · mcbr0 0 · veth 0 · iptables rule 8088 = 0 · iptables 10.88 = 0 · /run/minicontainer rỗng`.
+
+### Suite chạy lại sau khi sửa (183 case)
+
+| Máy | Kết quả | Log |
+|---|---|---|
+| Laptop x86_64 | **PASS=176 FAIL=0 SKIP=7** | `/tmp/lt5.log` |
+| Box aarch64 | **PASS=182 FAIL=0 SKIP=1** | `/root/mc-test4.log` |
+
+### Ghi chú hiệu chỉnh số cũ
+
+Mục "v2.0.0 — P6 adoption" phía trên ghi size/sha của bản **trước** khi sửa mountpoint `/proc`
+(`f400e3b7…` / `b6a46b12…`). Bản cuối cùng là bảng ở đầu mục này; các số recipe/suite/ship trong cả
+hai mục đều đo trên phần cứng thật, không ước lượng.

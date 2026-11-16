@@ -102,7 +102,12 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
   source `127/8` sang bridge. Đo được: `route_localnet=0` → `curl=000`, bật trên mcbr0 → `200`.
 - User namespace 1-uid: `setgroups` bị `deny` nên mọi `initgroups()`/`setgid()` để "drop privileges"
   đều `EPERM`. Image đa tiến trình phải chạy trên mapped root (nginx: `user root;` +
-  `master_process off;`; mosquitto: `user root`). Chown sang uid khác cũng `EINVAL`.
+  `master_process off;`; mosquitto: `user root`). Chown sang uid khác cũng `EINVAL`. Vì chỉ map
+  đúng 1 uid (`0 -> 65534`), `--user <uid khác 0>` **không dùng được** (trả lỗi rõ ràng); đừng
+  "sửa" bằng cách nới `uid_map` khi chưa có subuid delegation.
+- Vài image không có thư mục `/proc` (vd `busybox:latest`) → mountpoint `/proc` **phải** được tạo ở
+  phía host (`namespace_prepare_filesystem`) trước khi vào userns; trong userns thì `mkdir` trên
+  rootfs thuộc host-root trả `EACCES`.
 - Image thiếu `/etc/resolv.conf` làm `socket.getfqdn()` của Python chặn ~5 s trước khi `listen`
   (`HTTPServer.server_bind`), dễ bị đọc nhầm là "container không chạy".
 
