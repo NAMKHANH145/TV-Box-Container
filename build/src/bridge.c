@@ -85,6 +85,27 @@ static void default_iface(char *out, size_t n) {
 
 static void ipt_add(char *const av[]) { run_ipt(av); }  /* best-effort */
 
+/* P3.4: HOST:CONTAINER[/tcp|/udp]. */
+static int pub_parse(const char *spec, char *hp, size_t hpn, char *cp, size_t cpn,
+                     const char **proto) {
+    char buf[BUF_SIZE_SMALL];
+    snprintf(buf, sizeof buf, "%s", spec);
+    *proto = "tcp";
+    char *slash = strchr(buf, '/');
+    if (slash) {
+        *slash++ = 0;
+        if (strcmp(slash, "udp") == 0) *proto = "udp";
+        else if (strcmp(slash, "tcp") != 0) return -1;
+    }
+    char *colon = strchr(buf, ':');
+    if (!colon) return -1;
+    *colon++ = 0;
+    if (!buf[0] || !colon[0]) return -1;
+    snprintf(hp, hpn, "%s", buf);
+    snprintf(cp, cpn, "%s", colon);
+    return 0;
+}
+
 static void nat_setup(const char *container_ip, char **publish, int npublish) {
     if (!has_iptables()) {
         fprintf(stderr, "minicontainer: --net=bridge: no iptables -> container cannot reach Internet/NAT. "
@@ -108,28 +129,22 @@ static void nat_setup(const char *container_ip, char **publish, int npublish) {
     ipt_add(fwd_out);
     ipt_add(fwd_in);
 
-    /* Port mapping: -p hostport:containerport (TCP). */
+    /* Port mapping: -p hostport:containerport[/udp]. */
     for (int i = 0; i < npublish; i++) {
-        char spec[BUF_SIZE_SMALL];
-        snprintf(spec, sizeof spec, "%s", publish[i]);
-        char *colon = strchr(spec, ':');
-        if (!colon) {
-            fprintf(stderr, "minicontainer: --publish '%s' invalid format (need HOST:CONTAINER)\n", publish[i]);
+        char hp[BUF_SIZE_SMALL], cp[BUF_SIZE_SMALL];
+        const char *proto = "tcp";
+        if (pub_parse(publish[i], hp, sizeof hp, cp, sizeof cp, &proto) < 0) {
+            fprintf(stderr, "minicontainer: --publish '%s' invalid format (need HOST:CONTAINER[/udp])\n", publish[i]);
             continue;
         }
-        *colon = '\0';
-        const char *hp = spec;
-        const char *cp = colon + 1;
-        char *dnat[] = { "iptables", "-t", "nat", "-A", "PREROUTING",
-                         "-p", "tcp", "--dport", (char *)hp,
-                         "-j", "DNAT", "--to-destination", NULL, NULL, NULL };
-        /* build "--to-destination IP:PORT" */
-        static char todest[BUF_SIZE_MEDIUM];
+        char todest[BUF_SIZE_MEDIUM];
         snprintf(todest, sizeof todest, "%s:%s", container_ip, cp);
-        dnat[12] = todest;
+        char *dnat[] = { "iptables", "-t", "nat", "-A", "PREROUTING",
+                         "-p", (char *)proto, "--dport", hp,
+                         "-j", "DNAT", "--to-destination", todest, NULL };
         ipt_add(dnat);
-        char *allow[] = { "iptables", "-A", "FORWARD", "-p", "tcp", "-d", (char *)container_ip,
-                          "--dport", (char *)cp, "-j", "ACCEPT", NULL };
+        char *allow[] = { "iptables", "-A", "FORWARD", "-p", (char *)proto, "-d", (char *)container_ip,
+                          "--dport", cp, "-j", "ACCEPT", NULL };
         ipt_add(allow);
     }
 }
@@ -149,21 +164,17 @@ static void nat_teardown(const char *container_ip, char **publish, int npublish)
     run_ipt(fwd_in);
 
     for (int i = 0; i < npublish; i++) {
-        char buf[BUF_SIZE_SMALL];
-        snprintf(buf, sizeof buf, "%s", publish[i]);
-        char *colon = strchr(buf, ':');
-        if (!colon) continue;
-        *colon = '\0';
-        const char *hp = buf;
-        const char *cp = colon + 1;
-        static char todest[BUF_SIZE_MEDIUM];
+        char hp[BUF_SIZE_SMALL], cp[BUF_SIZE_SMALL];
+        const char *proto = "tcp";
+        if (pub_parse(publish[i], hp, sizeof hp, cp, sizeof cp, &proto) < 0) continue;
+        char todest[BUF_SIZE_MEDIUM];
         snprintf(todest, sizeof todest, "%s:%s", container_ip, cp);
         char *dnat[] = { "iptables", "-t", "nat", "-D", "PREROUTING",
-                         "-p", "tcp", "--dport", (char *)hp,
+                         "-p", (char *)proto, "--dport", hp,
                          "-j", "DNAT", "--to-destination", todest, NULL };
         run_ipt(dnat);
-        char *allow[] = { "iptables", "-D", "FORWARD", "-p", "tcp", "-d", (char *)container_ip,
-                          "--dport", (char *)cp, "-j", "ACCEPT", NULL };
+        char *allow[] = { "iptables", "-D", "FORWARD", "-p", (char *)proto, "-d", (char *)container_ip,
+                          "--dport", cp, "-j", "ACCEPT", NULL };
         run_ipt(allow);
     }
 }
@@ -302,6 +313,16 @@ int netns_lo_up(void) {
     int rc = set_updown(fd, "lo", 1);
     close(fd);
     return rc;
+}
+
+/* P3.3: a fresh netns starts at 1024, so nginx cannot listen on :80.
+ * This sysctl is per-netns, so it never leaks to the host. */
+int netns_allow_low_ports(void) {
+    int fd = open("/proc/sys/net/ipv4/ip_unprivileged_port_start", O_WRONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    ssize_t w = write(fd, "0", 1);
+    close(fd);
+    return w == 1 ? 0 : -1;
 }
 
 /* Serialize bridge_cfg over pipe (ABI-safe: length-prefixed fields, not raw struct) */

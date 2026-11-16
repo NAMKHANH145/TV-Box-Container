@@ -20,6 +20,19 @@ static inline int sys_pidfd_open(pid_t pid, unsigned int flags) {
     return syscall(__NR_pidfd_open, pid, flags);
 }
 
+static void restart_self(struct cfg *c) __attribute__((noreturn));
+static void restart_keeper(const char *dir, const char *id);
+static void rm_after_keeper(const char *dir, pid_t child);
+
+static int pid_alive(pid_t pid) {
+    char p[BUF_SIZE_SMALL], b[BUF_SIZE_MEDIUM];
+    if (pid <= 0) return 0;
+    snprintf(p, sizeof p, "/proc/%d/stat", pid);
+    if (read_small(p, b, sizeof b) < 0) return 0;
+    char *e = strrchr(b, ')');
+    return e && e[1] == ' ' && e[2] && e[2] != 'Z';
+}
+
 static volatile pid_t g_child_pid = -1;
 static volatile sig_atomic_t g_stop_sig;
 
@@ -206,16 +219,66 @@ int do_run(struct cfg *c) {
         return EXIT_SETUP_ERROR;
     }
 
-    /* P0.1: refuse a rootfs built for another arch before touching cgroups. */
+    /* Mount targets and /etc/hosts must exist before the child (mapped root,
+     * cannot write root-owned rootfs dirs) starts. */
+    if (namespace_prepare_filesystem(c) < 0)
+        return EXIT_SETUP_ERROR;
+
+    /* P0.1: refuse a rootfs built for another arch before touching cgroups.
+     * P3.8: --emulate opts into qemu-user instead (4-20x slower, needs
+     * qemu-<arch>-static on the host; seccomp drops to the deny-list). */
     if (c->rootfs) {
         char rarch[BUF_SIZE_SMALL];
         char shp[PATH_MAX + BUF_SIZE_SMALL];
         snprintf(shp, sizeof shp, "%s/bin/sh", c->rootfs);
         if (elf_arch(shp, rarch, sizeof rarch) == 0 && strcmp(rarch, MC_ARCH) != 0) {
-            fprintf(stderr, "minicontainer: rootfs la %s, may nay la %s\n", rarch, MC_ARCH);
-            fprintf(stderr, "  -> dung ban <app>-%s-rootfs.tar.gz, hoac: build --platform=linux-%s\n",
-                    MC_ARCH, MC_ARCH);
-            return EXIT_SETUP_ERROR;
+            if (!c->emulate) {
+                fprintf(stderr, "minicontainer: rootfs la %s, may nay la %s\n", rarch, MC_ARCH);
+                fprintf(stderr, "  -> dung ban <app>-%s-rootfs.tar.gz, hoac: build --platform=linux-%s\n",
+                        MC_ARCH, MC_ARCH);
+                fprintf(stderr, "  -> hoac chay voi --emulate (cham 4-20x)\n");
+                return EXIT_SETUP_ERROR;
+            }
+            const char *q = NULL;
+            if (strcmp(rarch, "aarch64") == 0) q = "qemu-aarch64-static";
+            else if (strcmp(rarch, "x86_64") == 0) q = "qemu-x86_64-static";
+            else if (strcmp(rarch, "armv7l") == 0) q = "qemu-arm-static";
+            else if (strcmp(rarch, "riscv64") == 0) q = "qemu-riscv64-static";
+            else if (strcmp(rarch, "i386") == 0) q = "qemu-i386-static";
+            char qpath[PATH_MAX];
+            int found = 0;
+            if (q) {
+                static const char *const dirs[] = { "/usr/bin", "/usr/local/bin", "/bin", "/usr/sbin" };
+                for (size_t i = 0; i < sizeof dirs / sizeof dirs[0]; i++) {
+                    if (fmt_path(qpath, sizeof qpath, "%s/%s", dirs[i], q) == 0 &&
+                        access(qpath, X_OK) == 0) { found = 1; break; }
+                }
+            }
+            if (!found) {
+                fprintf(stderr, "minicontainer: --emulate: rootfs la %s, khong tim thay %s\n",
+                        rarch, q ? q : "qemu-user-static");
+                fprintf(stderr, "  -> apt install qemu-user-static (hoac dung image dung arch)\n");
+                return EXIT_SETUP_ERROR;
+            }
+            static char *eav[128];
+            static char qemu_bind[] = "/dev/.mc-qemu";
+            c->base_cmd = c->cmd;      /* saved for `start` replay */
+            int n = 0;
+            eav[n++] = qemu_bind;
+            eav[n++] = "-L";
+            eav[n++] = "/";
+            for (char **a = c->cmd; a && *a && n < 127; a++) eav[n++] = *a;
+            eav[n] = NULL;
+            c->cmd = eav;
+            if (fmt_path(c->emulate_arch, sizeof c->emulate_arch, "%s", qpath) < 0) {
+                fprintf(stderr, "minicontainer: --emulate: qemu path too long\n");
+                return EXIT_SETUP_ERROR;
+            }
+            if (c->seccomp_mode == 1 || c->seccomp_mode == SECCOMP_MODE_PROFILE) {
+                fprintf(stderr, "minicontainer: --emulate: ha seccomp xuong deny-list (qemu can nhieu syscall)\n");
+                c->seccomp_mode = 0;
+            }
+            fprintf(stderr, "minicontainer: --emulate: %s qua %s (cham 4-20x)\n", rarch, qpath);
         }
     }
 
@@ -302,11 +365,15 @@ int do_run(struct cfg *c) {
         if (c->name) snprintf(id, sizeof id, "%s", c->name);
         else snprintf(id, sizeof id, "mc-%d", child);
         snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
-        for (int n = 1; mkdir(dir, 0755) < 0; n++) {
-            if (errno != EEXIST) die("mkdir state");
-            if (c->name) snprintf(id, sizeof id, "%s-%d", c->name, n);
-            else snprintf(id, sizeof id, "mc-%d-%d", child, n);
-            snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
+        if (c->reuse_state) {
+            if (mkdir(dir, 0755) < 0 && errno != EEXIST) die("mkdir state");
+        } else {
+            for (int n = 1; mkdir(dir, 0755) < 0; n++) {
+                if (errno != EEXIST) die("mkdir state");
+                if (c->name) snprintf(id, sizeof id, "%s-%d", c->name, n);
+                else snprintf(id, sizeof id, "mc-%d-%d", child, n);
+                snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
+            }
         }
         snprintf(f, sizeof f, "%s/pid", dir); snprintf(v, sizeof v, "%d", child);
         write_file(f, v);
@@ -325,10 +392,18 @@ int do_run(struct cfg *c) {
         snprintf(f, sizeof f, "%s/cmd", dir);
         write_file(f, cb);
         snprintf(f, sizeof f, "%s/seccomp", dir);
-        { char sv[16]; snprintf(sv, sizeof sv, "%d", c->seccomp_mode); write_file(f, sv); }
+        { char sv[16];
+          /* exec has no profile path after chroot; the deny-list is the
+           * closest equivalent for `exec` into a profile-filtered container. */
+          snprintf(sv, sizeof sv, "%d",
+                   c->seccomp_mode == SECCOMP_MODE_PROFILE ? 0 : c->seccomp_mode);
+          write_file(f, sv); }
         }
         snprintf(f, sizeof f, "%s/rootfs", dir);
         write_file(f, c->rootfs);
+        /* P3.2/P3.12: replayable config for inspect/start. */
+        if (state_save_run_config(dir, c) < 0)
+            fprintf(stderr, "minicontainer: warning: cannot save run config in %s\n", dir);
         if (have_bc) {
             snprintf(f, sizeof f, "%s/ip", dir);
             write_file(f, bc.ip);
@@ -417,6 +492,34 @@ int do_run(struct cfg *c) {
             }
         }
 
+        /* P3.2: --restart keeper. No supervisor daemon exists for detached
+         * runs, so one tiny process (only when the flag is used) waits for
+         * the container to die and replays `start <id>`. `stop` kills it. */
+        if (!c->reuse_state && c->restart && strcmp(c->restart, "no") != 0) {
+            pid_t rk = fork();
+            if (rk == 0) {
+                restart_keeper(dir, id);
+                _exit(0);
+            }
+            if (rk > 0) {
+                snprintf(f, sizeof f, "%s/restart_pid", dir);
+                snprintf(v, sizeof v, "%d", rk);
+                write_file(f, v);
+            } else {
+                fprintf(stderr, "minicontainer: warning: cannot start restart keeper\n");
+            }
+        }
+
+        /* P3.11: --rm keeper. Removes the state dir once the container exits;
+         * never in the signal handler, always in this normal-flow process. */
+        if (!c->reuse_state && c->rm_after) {
+            pid_t rk = fork();
+            if (rk == 0) {
+                rm_after_keeper(dir, child);
+                _exit(0);
+            }
+        }
+
         printf("%s\n", id);
         free(stack);
         return 0;
@@ -425,6 +528,8 @@ int do_run(struct cfg *c) {
     int status = 0;
     int disk_killed = wait_child(child, &status, disk_limit, disk_base,
                                  c->rootfs, cgdir, c->health_cmd);
+    /* Child is reaped: never let the signal handler kill a recycled PID. */
+    g_child_pid = -1;
 
     /* Ctrl-C / SIGTERM: handler killed child; clean up remaining processes
      * in cgroup then remove cgroup. */
@@ -434,5 +539,84 @@ int do_run(struct cfg *c) {
     free(stack);
     if (g_stop_sig) return EXIT_SIGNAL_BASE + g_stop_sig;
     if (disk_killed) return EXIT_SIGNAL_BASE + SIGKILL;
-    return WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+
+    /* P3.2: --restart for foreground runs (detached uses the keeper above). */
+    int rc = WIFEXITED(status) ? WEXITSTATUS(status) : 1;
+    if (c->restart && strcmp(c->restart, "no") != 0) {
+        if (strcmp(c->restart, "always") == 0 || rc != 0) {
+            fprintf(stderr, "minicontainer: restarting (%s)\n", c->restart);
+            sleep(1);
+            /* SIGTERM may arrive during the backoff; honor it instead of
+             * exec'ing another instance the caller can no longer reach. */
+            if (g_stop_sig) return EXIT_SIGNAL_BASE + g_stop_sig;
+            restart_self(c);
+        }
+    }
+    return rc;
+}
+
+/* Re-exec this binary with the original argv (P3.2 foreground restart). */
+static void restart_self(struct cfg *c) {
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (c->orig_argv && c->orig_argc > 1) {
+        if (n > 0) {
+            exe[n] = 0;
+            execv(exe, c->orig_argv);
+        }
+        execvp(c->orig_argv[0], c->orig_argv);
+    }
+    fprintf(stderr, "minicontainer: cannot re-exec for --restart: %s\n", strerror(errno));
+    exit(1);
+}
+
+/* P3.2: detached restart keeper. Polls the container PID, then asks this same
+ * binary to replay the saved config. `stop` kills this process first. */
+static void restart_keeper(const char *dir, const char *id) {
+    setsid();
+    int nfd = open("/dev/null", O_RDWR);
+    if (nfd >= 0) { dup2(nfd, 0); dup2(nfd, 1); dup2(nfd, 2); if (nfd > 2) close(nfd); }
+    char exe[PATH_MAX];
+    ssize_t n = readlink("/proc/self/exe", exe, sizeof exe - 1);
+    if (n <= 0) return;
+    exe[n] = 0;
+    for (;;) {
+        char f[PATH_MAX + BUF_SIZE_SMALL], b[BUF_SIZE_SMALL];
+        if (fmt_path(f, sizeof f, "%s/pid", dir) < 0) return;
+        if (read_small(f, b, sizeof b) < 0) { sleep(1); continue; }
+        pid_t pid = (pid_t)atoi(b);
+        while (pid_alive(pid)) sleep(1);
+        char *av[] = { exe, "start", (char *)id, NULL };
+        run_wait(av);
+        sleep(1);
+    }
+}
+
+/* P3.11: --rm keeper. Normal-flow cleanup after the container exits. */
+static void rm_after_keeper(const char *dir, pid_t child) {
+    setsid();
+    int nfd = open("/dev/null", O_RDWR);
+    if (nfd >= 0) { dup2(nfd, 0); dup2(nfd, 1); dup2(nfd, 2); if (nfd > 2) close(nfd); }
+    while (pid_alive(child)) sleep(1);
+
+    char f[PATH_MAX + BUF_SIZE_SMALL], cg[PATH_MAX] = "", rootfs[PATH_MAX] = "", b[BUF_SIZE_SMALL];
+    if (fmt_path(f, sizeof f, "%s/cgdir", dir) == 0) read_small(f, cg, sizeof cg);
+    if (fmt_path(f, sizeof f, "%s/rootfs", dir) == 0) read_small(f, rootfs, sizeof rootfs);
+    if (fmt_path(f, sizeof f, "%s/watchdog", dir) == 0) {
+        if (read_small(f, b, sizeof b) == 0) { int wd = atoi(b); if (wd > 1) kill(wd, SIGTERM); }
+    }
+    if (rootfs[0] && fmt_path(f, sizeof f, "%s/.oldroot", rootfs) == 0) rmdir(f);
+    if (cg[0] && access(cg, F_OK) == 0) {
+        cgroup_kill(cg);
+        for (int i = 0; i < 50 && !cgroup_empty(cg); i++) usleep(100000);
+        for (int i = 0; i < 20 && rmdir(cg) < 0 && errno != ENOENT; i++) usleep(100000);
+    }
+    static const char *const files[] = {
+        "pid", "cgdir", "cmd", "rootfs", "ip", "publish", "watchdog",
+        "restart_pid", "seccomp", "config", "argv", "disk_exceeded", "health_failed"
+    };
+    for (size_t i = 0; i < sizeof files / sizeof files[0]; i++)
+        if (fmt_path(f, sizeof f, "%s/%s", dir, files[i]) == 0) unlink(f);
+    log_purge(dir);
+    rmdir(dir);
 }

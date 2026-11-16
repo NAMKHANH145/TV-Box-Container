@@ -246,6 +246,15 @@ else
   t "bridge: host ping duoc container" ping -c2 -W2 "$IP1"
   t "bridge: trong container co eth0 + route mac dinh" $MC exec $B1 /bin/sh -c 'grep -q "^eth0" /proc/net/route'
   t "bridge: 2 container ping nhau" $MC exec $B1 /bin/sh -c "ping -c2 -W2 $IP2"
+  t "bridge: /etc/hosts cua peer co ten container" $MC exec $B2 grep -q "$B1" /etc/hosts
+  if command -v iptables >/dev/null 2>&1; then
+    B3=tb3$$
+    $MC run -d --name $B3 --net=bridge -p 15353:53/udp --rootfs $BR /bin/sleep 30 >/dev/null 2>&1
+    t "bridge: UDP publish tao DNAT" sh -c "iptables -t nat -S PREROUTING 2>/dev/null | grep -q 15353"
+    $MC stop $B3 >/dev/null 2>&1; $MC rm -f $B3 >/dev/null 2>&1
+  else
+    skip "bridge: UDP publish (thieu iptables)"
+  fi
   t "bridge: khong ton tai file IP cung dai" test "$IP1" != "$IP2"
   $MC stop $B1 >/dev/null 2>&1; $MC rm $B1 >/dev/null 2>&1
   $MC stop $B2 >/dev/null 2>&1; $MC rm $B2 >/dev/null 2>&1
@@ -466,6 +475,58 @@ printf '{"ociVersion":"1.0.2","process":{"args":["/bin/sh","-c","echo C=$(pwd); 
 t "oci-run: env + cwd + mounts[]" sh -c "$MC oci-run $OB | grep -qx C=/tmp && $MC oci-run $OB | grep -qx E=bundle"
 rm -rf $OB
 rm -rf $SD
+echo "=== P3: runtime-spec + CLI parity ==="
+t "P3.1 --ulimit nofile" $MC run --rootfs $BR --ulimit nofile=32:32 /bin/sh -c '[ "$(ulimit -n)" = 32 ]'
+t "P3.1 --ulimit sai bi tu choi" sh -c "! $MC run --rootfs $BR --ulimit bogus=1 /bin/true >/dev/null 2>&1"
+V=/tmp/mcvol$$; mkdir -p $V; chmod 777 $V
+$MC run --rootfs $BR -v $V:/mnt /bin/sh -c 'echo vol >/mnt/x' >/dev/null 2>&1
+t "P3.2 -v HOST:CTR bind ghi ra host" grep -qx vol $V/x
+rm -rf $V
+M5=tm$$; MCG=""
+$MC run -d --name $M5 --memory-high 16M --cpu-weight 200 --rootfs $BR /bin/sleep 60 >/dev/null 2>&1
+MCG=$(cat /run/minicontainer/$M5/cgdir 2>/dev/null)
+t "P3.5 memory.high duoc ghi" grep -qx 16777216 "$MCG/memory.high"
+t "P3.5 cpu.weight duoc ghi" grep -qx 200 "$MCG/cpu.weight"
+t "P3.2 inspect JSON co resources" sh -c "$MC inspect $M5 | grep -q '\"memory_high\": 16777216' && $MC inspect $M5 | grep -q '\"status\": \"RUNNING\"'"
+t "P3.2 inspect id sai bi tu choi" sh -c "! $MC inspect khongco$$ >/dev/null 2>&1"
+$MC exec $M5 /bin/sh -c 'echo cp-out > /tmp/cpfile'
+$MC cp $M5:/tmp/cpfile /tmp/cpout$$ >/dev/null 2>&1
+t "P3.9 cp ra host" grep -qx cp-out /tmp/cpout$$
+echo cp-in > /tmp/cpin$$
+$MC cp /tmp/cpin$$ $M5:/tmp/cpin >/dev/null 2>&1
+t "P3.9 cp vao container" sh -c "$MC exec $M5 cat /tmp/cpin | grep -qx cp-in"
+t "P3.9 cp chan .." sh -c "! $MC cp $M5:/../../etc/passwd /tmp/mcesc$$ >/dev/null 2>&1"
+rm -f /tmp/cpout$$ /tmp/cpin$$ /tmp/mcesc$$
+$MC stop $M5 >/dev/null 2>&1
+t "P3.12 start chay lai config da luu" sh -c "$MC start $M5 >/dev/null && $MC ps | grep -q '$M5.*RUNNING'"
+t "P3.2 restart" sh -c "$MC restart $M5 >/dev/null && $MC ps | grep -q '$M5.*RUNNING'"
+t "P3.2 start khi dang chay bi tu choi" sh -c "! $MC start $M5 >/dev/null 2>&1"
+$MC stop $M5 >/dev/null 2>&1
+t "P3.2 rm" $MC rm $M5
+t "P3.10 --init: app khong phai PID 1" $MC run --init --rootfs $BR /bin/sh -c '[ $$ -ne 1 ]'
+R5=tmrm$$; $MC run -d --rm --name $R5 --rootfs $BR /bin/sh -c 'sleep 1' >/dev/null 2>&1
+sleep 4
+t "P3.11 --rm xoa state sau khi thoat" sh -c "[ ! -e /run/minicontainer/$R5 ]"
+RS=$BR/tmp/rs$$
+timeout -k 2 6 $MC run --restart=always --rootfs $BR /bin/sh -c "echo x >> /tmp/rs$$" >/dev/null 2>&1
+NRS=$(wc -l < $RS 2>/dev/null || echo 0)
+if [ "${NRS:-0}" -ge 2 ]; then echo "PASS: P3.2 --restart=always chay lai ($NRS lan)"; PASS=$((PASS+1)); else echo "FAIL: P3.2 --restart=always ($NRS lan)"; FAIL=$((FAIL+1)); fi
+rm -f $RS
+timeout -k 2 4 $MC run --restart=on-failure --rootfs $BR /bin/true >/dev/null 2>&1
+t "P3.2 --restart=on-failure: exit 0 khong restart" test $? -eq 0
+RK=tmkr$$; $MC run -d --name $RK --restart=always --rootfs $BR /bin/sleep 1 >/dev/null 2>&1
+P1=$(cat /run/minicontainer/$RK/pid 2>/dev/null)
+sleep 5
+P2=$(cat /run/minicontainer/$RK/pid 2>/dev/null)
+t "P3.2 restart keeper (detached) chay lai" sh -c "[ -n '$P1' ] && [ -n '$P2' ] && [ '$P1' != '$P2' ]"
+$MC stop $RK >/dev/null 2>&1; $MC rm $RK >/dev/null 2>&1
+t "P3.3 port <1024: ip_unprivileged_port_start=0 trong netns" $MC run --net=isolated --rootfs $BR /bin/sh -c 'grep -qx 0 /proc/sys/net/ipv4/ip_unprivileged_port_start'
+SJ=/tmp/mcseccomp$$.json
+printf '{"defaultAction":"SCMP_ACT_ALLOW","syscalls":[{"names":["mount"],"action":"SCMP_ACT_ERRNO"}]}' > $SJ
+t "P3.6 seccomp JSON tu choi mount" $MC run --rootfs $BR --seccomp=$SJ /bin/sh -c '! mount -t proc proc /tmp/m 2>/dev/null'
+t "P3.6 seccomp JSON cho phep syscall khac" sh -c "$MC run --rootfs $BR --seccomp=$SJ /bin/sh -c 'echo sjson' | grep -qx sjson"
+rm -f $SJ
+skip "P3.8 --emulate (can qemu-user-static + rootfs ngoai arch)"
 echo "=== leak ==="
 t "mount leak = 0" sh -c "! mount | grep -Fq '$BR/' && ! mount | grep -Fq '$ALP/'"
 echo "=== T7 latency (assert <500ms) ==="

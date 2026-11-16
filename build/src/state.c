@@ -1,6 +1,8 @@
 /* state.c — ps/stats/stop/rm: quan ly qua state dir + cgroupfs, khong daemon */
 #include "common.h"
 
+static int pid_running(int pid);
+
 static int state_cgdir_valid(const char *path) {
     size_t base = strlen(CGROUP_BASE);
     if (!path || strncmp(path, CGROUP_BASE "/", base + 1) != 0 || !path[base + 1]) return 0;
@@ -93,6 +95,34 @@ static void json_print_kv_int(const char *key, long val, int *first) {
     printf("\"%s\": %ld", key, val);
 }
 
+/* A JSON string value without a key (for arrays). */
+static void json_print_value(const char *val) {
+    printf("\"");
+    for (const char *p = val; *p; p++) {
+        switch (*p) {
+            case '"': printf("\\\""); break;
+            case '\\': printf("\\\\"); break;
+            case '\n': printf("\\n"); break;
+            case '\r': printf("\\r"); break;
+            case '\t': printf("\\t"); break;
+            default: putchar(*p);
+        }
+    }
+    printf("\"");
+}
+
+static void json_print_kv_arr(const char *key, char **arr, int n, int *first) {
+    if (n <= 0) return;
+    if (!*first) printf(", ");
+    *first = 0;
+    printf("\"%s\": [", key);
+    for (int i = 0; i < n; i++) {
+        if (i) printf(", ");
+        json_print_value(arr[i]);
+    }
+    printf("]");
+}
+
 /* ministat <id> */
 int do_stats(const char *id, int json) {
     if (!valid_name(id)) { fprintf(stderr, "invalid container id\n"); return 1; }
@@ -166,6 +196,261 @@ int do_stats(const char *id, int json) {
         }
     }
     return 0;
+}
+
+/* ---- P3.2: persisted run config, used by inspect and start ---- */
+
+int state_save_run_config(const char *dir, const struct cfg *c) {
+    char path[PATH_MAX];
+    if (fmt_path(path, sizeof path, "%s/config", dir) < 0) return -1;
+    FILE *f = fopen(path, "w");
+    if (!f) return -1;
+    fprintf(f, "rootfs=%s\n", c->rootfs ? c->rootfs : "");
+    fprintf(f, "image=%s\n", c->image ? c->image : "");
+    fprintf(f, "net=%s\n", c->net ? c->net : "host");
+    fprintf(f, "hostname=%s\n", c->hostname ? c->hostname : "");
+    fprintf(f, "seccomp=%d\n", c->seccomp_mode);
+    fprintf(f, "seccomp_profile=%s\n", c->seccomp_profile ? c->seccomp_profile : "");
+    fprintf(f, "init=%d\n", c->init_enabled);
+    fprintf(f, "emulate=%d\n", c->emulate);
+    fprintf(f, "rm=%d\n", c->rm_after);
+    fprintf(f, "restart=%s\n", c->restart ? c->restart : "no");
+    fprintf(f, "ram=%ld\n", c->ram);
+    fprintf(f, "cpu=%d\n", c->cpu);
+    fprintf(f, "pids=%ld\n", c->pids);
+    fprintf(f, "io=%ld\n", c->io);
+    fprintf(f, "disk=%ld\n", c->max_disk);
+    fprintf(f, "memory_high=%ld\n", c->memory_high);
+    fprintf(f, "cpu_weight=%ld\n", c->cpu_weight);
+    fprintf(f, "workdir=%s\n", c->workdir ? c->workdir : "");
+    fprintf(f, "user=%s\n", c->user ? c->user : "");
+    for (int i = 0; i < c->nenv; i++)
+        if (!strchr(c->env[i], '\n')) fprintf(f, "env=%s\n", c->env[i]);
+    for (int i = 0; i < c->nmounts; i++)
+        if (!strchr(c->mounts[i], '\n')) fprintf(f, "mount=%s\n", c->mounts[i]);
+    for (int i = 0; i < c->npublish; i++)
+        if (!strchr(c->publish[i], '\n')) fprintf(f, "publish=%s\n", c->publish[i]);
+    for (int i = 0; i < c->nulimits; i++)
+        if (!strchr(c->ulimits[i], '\n')) fprintf(f, "ulimit=%s\n", c->ulimits[i]);
+    if (fclose(f) != 0) return -1;
+
+    if (fmt_path(path, sizeof path, "%s/argv", dir) < 0) return -1;
+    int fd = open(path, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+    if (fd < 0) return -1;
+    int ok = 1;
+    char **sav = c->base_cmd ? c->base_cmd : c->cmd;
+    for (char **a = sav; a && *a; a++) {
+        size_t n = strlen(*a) + 1;
+        if (write(fd, *a, n) != (ssize_t)n) { ok = 0; break; }
+    }
+    close(fd);
+    if (!ok) unlink(path);
+    return ok ? 0 : -1;
+}
+
+struct persisted_cfg {
+    char lines[160][PATH_MAX];
+    char *env[32], *mounts[32], *publish[MAX_PUBLISH], *ulimits[16];
+    int nenv, nmounts, npublish, nulimits;
+    char argbuf[BUF_SIZE_HUGE];
+    char *argv[65];
+    int argc;
+};
+
+static struct persisted_cfg g_pcfg;
+
+static int load_run_config(const char *dir, struct cfg *c) {
+    memset(c, 0, sizeof *c);
+    c->ram = -1; c->cpu = -1; c->pids = 64; c->io = -1; c->max_disk = -1;
+    c->net = "host";
+    c->hostname = "minicontainer-os";
+    c->restart = "no";
+
+    char path[PATH_MAX];
+    if (fmt_path(path, sizeof path, "%s/config", dir) < 0) return -1;
+    FILE *f = fopen(path, "r");
+    if (!f) return -1;
+    int n = 0;
+    while (n < 160 && fgets(g_pcfg.lines[n], PATH_MAX, f)) {
+        char *line = g_pcfg.lines[n];
+        size_t l = strlen(line);
+        while (l && (line[l-1] == '\n' || line[l-1] == '\r')) line[--l] = 0;
+        if (!line[0]) continue;
+        char *eq = strchr(line, '=');
+        if (!eq) continue;
+        *eq++ = 0;
+        const char *k = line, *v = eq;
+        if (strcmp(k, "rootfs") == 0) c->rootfs = v;
+        else if (strcmp(k, "image") == 0) c->image = v[0] ? v : NULL;
+        else if (strcmp(k, "net") == 0) c->net = v;
+        else if (strcmp(k, "hostname") == 0) c->hostname = v;
+        else if (strcmp(k, "seccomp") == 0) c->seccomp_mode = atoi(v);
+        else if (strcmp(k, "seccomp_profile") == 0) c->seccomp_profile = v[0] ? v : NULL;
+        else if (strcmp(k, "init") == 0) c->init_enabled = atoi(v);
+        else if (strcmp(k, "emulate") == 0) c->emulate = atoi(v);
+        else if (strcmp(k, "rm") == 0) c->rm_after = atoi(v);
+        else if (strcmp(k, "restart") == 0) c->restart = v;
+        else if (strcmp(k, "ram") == 0) c->ram = atol(v);
+        else if (strcmp(k, "cpu") == 0) c->cpu = atoi(v);
+        else if (strcmp(k, "pids") == 0) c->pids = atol(v);
+        else if (strcmp(k, "io") == 0) c->io = atol(v);
+        else if (strcmp(k, "disk") == 0) c->max_disk = atol(v);
+        else if (strcmp(k, "memory_high") == 0) c->memory_high = atol(v);
+        else if (strcmp(k, "cpu_weight") == 0) c->cpu_weight = atol(v);
+        else if (strcmp(k, "workdir") == 0) c->workdir = v[0] ? v : NULL;
+        else if (strcmp(k, "user") == 0) c->user = v[0] ? v : NULL;
+        else if (strcmp(k, "env") == 0 && g_pcfg.nenv < 32) {
+            c->env = g_pcfg.env;
+            g_pcfg.env[g_pcfg.nenv++] = (char *)v;
+        } else if (strcmp(k, "mount") == 0 && g_pcfg.nmounts < 32) {
+            c->mounts = g_pcfg.mounts;
+            g_pcfg.mounts[g_pcfg.nmounts++] = (char *)v;
+        } else if (strcmp(k, "publish") == 0 && g_pcfg.npublish < MAX_PUBLISH) {
+            c->publish = g_pcfg.publish;
+            g_pcfg.publish[g_pcfg.npublish++] = (char *)v;
+        } else if (strcmp(k, "ulimit") == 0 && g_pcfg.nulimits < 16) {
+            c->ulimits = g_pcfg.ulimits;
+            g_pcfg.ulimits[g_pcfg.nulimits++] = (char *)v;
+        }
+        n++;
+    }
+    fclose(f);
+    c->nenv = g_pcfg.nenv;
+    c->nmounts = g_pcfg.nmounts;
+    c->npublish = g_pcfg.npublish;
+    c->nulimits = g_pcfg.nulimits;
+
+    if (fmt_path(path, sizeof path, "%s/argv", dir) < 0) return -1;
+    int fd = open(path, O_RDONLY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    ssize_t r = read(fd, g_pcfg.argbuf, sizeof g_pcfg.argbuf - 1);
+    close(fd);
+    if (r <= 0) return -1;
+    g_pcfg.argbuf[r] = 0;
+    int argc = 0;
+    for (ssize_t i = 0; i < r && argc < 64; i += (ssize_t)strlen(g_pcfg.argbuf + i) + 1)
+        g_pcfg.argv[argc++] = g_pcfg.argbuf + i;
+    if (argc == 0) return -1;
+    g_pcfg.argv[argc] = NULL;
+    g_pcfg.argc = argc;
+    c->cmd = g_pcfg.argv;
+    return 0;
+}
+
+/* inspect <id>: JSON, same field names as `ps --json` for status/pid. */
+int do_inspect(const char *id, int json) {
+    (void)json;
+    if (!valid_name(id)) { fprintf(stderr, "invalid container id\n"); return 1; }
+    char dir[BUF_SIZE_LARGE], f[PATH_MAX + BUF_SIZE_SMALL], buf[BUF_SIZE_SMALL];
+    snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
+    snprintf(f, sizeof f, "%s/pid", dir);
+    if (read_small(f, buf, sizeof buf) < 0) {
+        fprintf(stderr, "no container '%s'\n", id);
+        return 1;
+    }
+    int pid = atoi(buf);
+    snprintf(f, sizeof f, "/proc/%d/stat", pid);
+    const char *status = "STOPPED";
+    char st[BUF_SIZE_MEDIUM];
+    if (read_small(f, st, sizeof st) == 0) {
+        char *e = strrchr(st, ')');
+        if (e && e[1] == ' ' && e[2] && e[2] != 'Z') status = "RUNNING";
+    }
+
+    struct cfg c;
+    int have_cfg = load_run_config(dir, &c) == 0;
+    if (!have_cfg) {
+        memset(&c, 0, sizeof c);
+        c.ram = -1; c.cpu = -1; c.pids = -1; c.io = -1; c.max_disk = -1;
+        c.net = ""; c.hostname = ""; c.restart = "no";
+    }
+
+    char cg[PATH_MAX] = "";
+    snprintf(f, sizeof f, "%s/cgdir", dir);
+    read_small(f, cg, sizeof cg);
+
+    int first = 1;
+    printf("{");
+    json_print_kv_str("id", id, &first);
+    json_print_kv_str("status", status, &first);
+    json_print_kv_int("pid", pid, &first);
+    int have_argv = have_cfg && c.cmd && c.cmd[0];
+    if (have_argv)
+        json_print_kv_arr("argv", c.cmd, g_pcfg.argc, &first);
+    json_print_kv_str("rootfs", c.rootfs ? c.rootfs : "", &first);
+    json_print_kv_str("image", c.image ? c.image : "", &first);
+    json_print_kv_str("net", c.net ? c.net : "", &first);
+    json_print_kv_str("hostname", c.hostname ? c.hostname : "", &first);
+    json_print_kv_int("seccomp", c.seccomp_mode, &first);
+    json_print_kv_str("restart", c.restart ? c.restart : "no", &first);
+    json_print_kv_str("cgroup", cg, &first);
+    json_print_kv_int("memory", c.ram, &first);
+    json_print_kv_int("memory_high", c.memory_high, &first);
+    json_print_kv_int("cpu", c.cpu, &first);
+    json_print_kv_int("cpu_weight", c.cpu_weight, &first);
+    json_print_kv_int("pids", c.pids, &first);
+    json_print_kv_int("io", c.io, &first);
+    if (have_cfg) {
+        json_print_kv_arr("publish", c.publish, c.npublish, &first);
+        json_print_kv_arr("mounts", c.mounts, c.nmounts, &first);
+        json_print_kv_arr("env", c.env, c.nenv, &first);
+    }
+    printf("}\n");
+    return 0;
+}
+
+/* start <id>: replay the saved config. Detached only (state exists only for
+ * containers that were started with -d). */
+int do_start(const char *id) {
+    if (!valid_name(id)) { fprintf(stderr, "invalid container id\n"); return 1; }
+    char dir[BUF_SIZE_LARGE], f[PATH_MAX + BUF_SIZE_SMALL], buf[BUF_SIZE_SMALL];
+    snprintf(dir, sizeof dir, STATE_BASE "/%s", id);
+    snprintf(f, sizeof f, "%s/pid", dir);
+    if (read_small(f, buf, sizeof buf) < 0) {
+        fprintf(stderr, "no container '%s'\n", id);
+        return 1;
+    }
+    int oldpid = atoi(buf);
+    char cg[PATH_MAX] = "";
+    snprintf(f, sizeof f, "%s/cgdir", dir);
+    read_small(f, cg, sizeof cg);
+    if (pid_running(oldpid) || (cg[0] && access(cg, F_OK) == 0 && !cgroup_empty(cg))) {
+        fprintf(stderr, "'%s' is already running\n", id);
+        return 1;
+    }
+
+    struct cfg c;
+    if (load_run_config(dir, &c) < 0) {
+        fprintf(stderr, "'%s' has no saved config (created by an older version?) \u2014 use rm + run\n", id);
+        return 1;
+    }
+    if (!c.rootfs || !c.cmd || !c.cmd[0]) {
+        fprintf(stderr, "'%s': saved config is incomplete\n", id);
+        return 1;
+    }
+    c.name = id;
+    c.detach = 1;
+    c.reuse_state = 1;
+
+    snprintf(f, sizeof f, "%s/pid", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/cgdir", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/watchdog", dir); unlink(f);
+    /* Keep restart_pid: when `start` was invoked by the keeper itself, the
+     * keeper is still alive and `stop` must be able to kill it. */
+    snprintf(f, sizeof f, "%s/ip", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/publish", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
+
+    /* The old cgroup dir usually outlives its processes; remove it before
+     * run creates a fresh one, otherwise `start` leaks one dir per replay. */
+    if (cg[0] && access(cg, F_OK) == 0 && cgroup_empty(cg)) {
+        for (int i = 0; i < 20 && rmdir(cg) < 0 && errno != ENOENT; i++) usleep(100000);
+    }
+
+    int rc = do_run(&c);
+    if (rc == 0) printf("%s: started\n", id);
+    return rc;
 }
 
 /* ps */
@@ -270,6 +555,11 @@ int do_stop(const char *id, int timeout) {
     read_small(f, pubbuf, sizeof pubbuf);
     snprintf(f, sizeof f, "%s/watchdog", dir);
     int wd = (read_small(f, wdbuf, sizeof wdbuf) == 0) ? atoi(wdbuf) : 0;
+    /* Kill the --restart keeper BEFORE the container, otherwise it can see
+     * the pid disappear and start the container right back up. */
+    snprintf(f, sizeof f, "%s/restart_pid", dir);
+    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) { int rp = atoi(rb); if (rp > 1) kill(rp, SIGTERM); } }
+    unlink(f);
 
     if (!state_rootfs_valid(rootfs) || !state_relationship_valid(cg, pid)) {
         fprintf(stderr, "invalid persisted container state\n");
@@ -358,6 +648,9 @@ int do_rm(const char *id, int force) {
     read_small(f, pubbuf, sizeof pubbuf);
     snprintf(f, sizeof f, "%s/watchdog", dir);
     int wd = (read_small(f, wdbuf, sizeof wdbuf) == 0) ? atoi(wdbuf) : 0;
+    snprintf(f, sizeof f, "%s/restart_pid", dir);
+    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) { int rp = atoi(rb); if (rp > 1) kill(rp, SIGTERM); } }
+    unlink(f);
 
     if (!state_rootfs_valid(rootfs) || !state_relationship_valid(cg, pid)) {
         fprintf(stderr, "invalid persisted container state\n");
@@ -400,7 +693,10 @@ int do_rm(const char *id, int force) {
     snprintf(f, sizeof f, "%s/ip", dir); unlink(f);
     snprintf(f, sizeof f, "%s/publish", dir); unlink(f);
     snprintf(f, sizeof f, "%s/watchdog", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/restart_pid", dir); unlink(f);
     snprintf(f, sizeof f, "%s/seccomp", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/config", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/argv", dir); unlink(f);
     snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
     snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
     log_purge(dir);
@@ -433,7 +729,6 @@ static int gc_state(const char *name, int dry) {
     snprintf(f, sizeof f, "%s/publish", dir); read_small(f, pubbuf, sizeof pubbuf);
     snprintf(f, sizeof f, "%s/watchdog", dir);
     int wd = (read_small(f, buf, sizeof buf) == 0) ? atoi(buf) : 0;
-
     int cg_live = (cg[0] && access(cg, F_OK) == 0 && !cgroup_empty(cg));
     if (pid_running(pid) || cg_live) return 0;             /* still a live container */
 
@@ -451,6 +746,8 @@ static int gc_state(const char *name, int dry) {
         bridge_teardown(pid, pubs, np);
     }
     if (wd > 1) kill(wd, SIGTERM);
+    snprintf(f, sizeof f, "%s/restart_pid", dir);
+    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) { int rp = atoi(rb); if (rp > 1) kill(rp, SIGTERM); } }
 
     snprintf(f, sizeof f, "%s/pid", dir);           unlink(f);
     snprintf(f, sizeof f, "%s/cgdir", dir);         unlink(f);
@@ -459,7 +756,10 @@ static int gc_state(const char *name, int dry) {
     snprintf(f, sizeof f, "%s/ip", dir);            unlink(f);
     snprintf(f, sizeof f, "%s/publish", dir);       unlink(f);
     snprintf(f, sizeof f, "%s/watchdog", dir);      unlink(f);
+    snprintf(f, sizeof f, "%s/restart_pid", dir);   unlink(f);
     snprintf(f, sizeof f, "%s/seccomp", dir);       unlink(f);
+    snprintf(f, sizeof f, "%s/config", dir);        unlink(f);
+    snprintf(f, sizeof f, "%s/argv", dir);          unlink(f);
     snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
     snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
     log_purge(dir);

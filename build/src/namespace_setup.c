@@ -184,20 +184,117 @@ void namespace_mount_proc(void) {
  * Runs after chroot, so `dest` is a path inside the container. /proc, /dev and
  * /sys are already provided by the setup (mounting a tmpfs over /dev would
  * hide the device nodes we just created), so those destinations are skipped. */
-static int mount_spec_one(const char *spec) {
-    char buf[PATH_MAX * 3];
-    snprintf(buf, sizeof buf, "%s", spec);
-    char *type = buf;
-    char *src = strchr(type, ':');
-    if (!src) { fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n"); return -1; }
-    *src++ = 0;
-    char *dst = strchr(src, ':');
-    if (!dst) { fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n"); return -1; }
-    *dst++ = 0;
-    char *opts = strchr(dst, ':');
-    if (opts) *opts++ = 0;
+/* mode 1: only bind mounts, applied BEFORE chroot with the host rootfs as
+ * prefix (their source is a host path). mode 2: only non-bind mounts, applied
+ * after chroot. */
+static int spec_split(const char *spec, char *buf, size_t n,
+                      char **type, char **src, char **dst, char **opts) {
+    if (strlen(spec) >= n) return -1;
+    snprintf(buf, n, "%s", spec);
+    *type = buf;
+    char *c = strchr(buf, ':');
+    if (!c) return -1;
+    *c++ = 0;
+    *src = c;
+    c = strchr(c, ':');
+    if (!c) return -1;
+    *c++ = 0;
+    *dst = c;
+    *opts = strchr(c, ':');
+    if (*opts) { **opts = 0; (*opts)++; }
+    return 0;
+}
 
-    if (dst[0] != '/') { fprintf(stderr, "minicontainer: mount dest must be absolute\n"); return -1; }
+/* Absolute path with no '.'/'..' components; used before touching the host. */
+static int safe_abs_path(const char *p) {
+    if (!p || p[0] != '/') return 0;
+    for (const char *s = p; *s;) {
+        while (*s == '/') s++;
+        if (!*s) break;
+        const char *e = strchr(s, '/');
+        size_t l = e ? (size_t)(e - s) : strlen(s);
+        if ((l == 1 && s[0] == '.') || (l == 2 && s[0] == '.' && s[1] == '.')) return 0;
+        s = e ? e + 1 : s + l;
+    }
+    return 1;
+}
+
+/* Create dst inside rootfs without following any symlink (parent is host
+ * root, so a symlink escape would create host directories). */
+static int mkdir_in_root(const char *rootfs, const char *dst, mode_t mode) {
+    int fd = open(rootfs, O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if (fd < 0) return -1;
+    char buf[PATH_MAX];
+    if (strlen(dst) >= sizeof buf) { close(fd); return -1; }
+    snprintf(buf, sizeof buf, "%s", dst);
+    char *save = NULL;
+    for (char *comp = strtok_r(buf, "/", &save); comp; comp = strtok_r(NULL, "/", &save)) {
+        int next = openat(fd, comp, O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+        if (next < 0) {
+            if (errno != ENOENT) { close(fd); return -1; }
+            if (mkdirat(fd, comp, mode) < 0 && errno != EEXIST) { close(fd); return -1; }
+            next = openat(fd, comp, O_PATH | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+            if (next < 0) { close(fd); return -1; }
+        }
+        close(fd);
+        fd = next;
+    }
+    close(fd);
+    return 0;
+}
+
+/* Called in the parent (host root) before clone: mount targets under a
+ * root-owned rootfs cannot be created by the mapped-root child. Also makes
+ * sure /etc/hosts exists so the child can bind its generated file over it. */
+int namespace_prepare_filesystem(struct cfg *c) {
+    for (int i = 0; i < c->nmounts; i++) {
+        char buf[PATH_MAX * 3], *type, *src, *dst, *opts;
+        if (spec_split(c->mounts[i], buf, sizeof buf, &type, &src, &dst, &opts) < 0) {
+            fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n");
+            return -1;
+        }
+        if (!strcmp(dst, "/proc") || !strcmp(dst, "/dev") || !strcmp(dst, "/sys")) continue;
+        if (!safe_abs_path(dst)) {
+            fprintf(stderr, "minicontainer: unsafe mount destination: %s\n", dst);
+            return -1;
+        }
+        if (mkdir_in_root(c->rootfs, dst, 0755) < 0) {
+            fprintf(stderr, "minicontainer: cannot create mount point %s: %s\n", dst, strerror(errno));
+            return -1;
+        }
+    }
+    if (c->net && strcmp(c->net, "bridge") == 0) {
+        if (mkdir_in_root(c->rootfs, "/etc", 0755) < 0) {
+            fprintf(stderr, "minicontainer: cannot create /etc for hosts: %s\n", strerror(errno));
+            return -1;
+        }
+        char hp[PATH_MAX + BUF_SIZE_SMALL];
+        if (path_join(hp, sizeof hp, c->rootfs, "etc/hosts") < 0) return -1;
+        struct stat st;
+        if (lstat(hp, &st) < 0 && errno == ENOENT) {
+            int fd = open(hp, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+            if (fd < 0) {
+                fprintf(stderr, "minicontainer: cannot create /etc/hosts: %s\n", strerror(errno));
+                return -1;
+            }
+            close(fd);
+        }
+    }
+    return 0;
+}
+
+static int mount_spec_one(const char *spec, const char *prefix, int mode) {
+    char buf[PATH_MAX * 3];
+    char *type, *src, *dst, *opts;
+    if (spec_split(spec, buf, sizeof buf, &type, &src, &dst, &opts) < 0) {
+        fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n");
+        return -1;
+    }
+
+    int is_bind = strcmp(type, "bind") == 0;
+    if ((mode == 1) != is_bind) return 0;
+
+    if (!safe_abs_path(dst)) { fprintf(stderr, "minicontainer: unsafe mount destination: %s\n", dst); return -1; }
     if (strcmp(dst, "/proc") == 0 || strcmp(dst, "/dev") == 0 || strcmp(dst, "/sys") == 0)
         return 0;
 
@@ -221,33 +318,87 @@ static int mount_spec_one(const char *spec) {
             }
         }
     }
+    char target[PATH_MAX * 2];
+    int tlen = snprintf(target, sizeof target, "%s%s", prefix, dst);
+    if (tlen < 0 || tlen >= (int)sizeof target) {
+        fprintf(stderr, "minicontainer: mount dest too long: %s\n", dst);
+        return -1;
+    }
     char dircopy[PATH_MAX * 2];
-    snprintf(dircopy, sizeof dircopy, "%s", dst);
+    snprintf(dircopy, sizeof dircopy, "%s", target);
     if (mkdir_p(dircopy) < 0) {
-        fprintf(stderr, "minicontainer: cannot create mount point %s: %s\n", dst, strerror(errno));
+        fprintf(stderr, "minicontainer: cannot create mount point %s: %s\n", target, strerror(errno));
         return -1;
     }
 
-    if (strcmp(type, "bind") == 0) {
-        if (mount(src, dst, NULL, MS_BIND | (flags & MS_REC), NULL) < 0) {
-            fprintf(stderr, "minicontainer: mount --bind %s -> %s: %s\n", src, dst, strerror(errno));
+    if (is_bind) {
+        if (mount(src, target, NULL, MS_BIND | (flags & MS_REC), NULL) < 0) {
+            fprintf(stderr, "minicontainer: mount --bind %s -> %s: %s\n", src, target, strerror(errno));
             return -1;
         }
-        if (flags & MS_RDONLY) mount(NULL, dst, NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL);
+        if (flags & MS_RDONLY) mount(NULL, target, NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL);
         return 0;
     }
     const char *fstype = type;
     const char *source = src[0] ? src : type;
-    if (mount(source, dst, fstype, flags, data[0] ? data : NULL) < 0) {
-        fprintf(stderr, "minicontainer: mount -t %s %s: %s\n", fstype, dst, strerror(errno));
+    if (mount(source, target, fstype, flags, data[0] ? data : NULL) < 0) {
+        fprintf(stderr, "minicontainer: mount -t %s %s: %s\n", fstype, target, strerror(errno));
         return -1;
     }
     return 0;
 }
 
+void namespace_apply_bind_mounts(struct cfg *c) {
+    for (int i = 0; i < c->nmounts; i++) {
+        if (mount_spec_one(c->mounts[i], c->rootfs, 1) < 0) die("bind mount from config");
+    }
+}
+
 void namespace_apply_mounts(struct cfg *c) {
     for (int i = 0; i < c->nmounts; i++) {
-        if (mount_spec_one(c->mounts[i]) < 0) die("mount from config");
+        if (mount_spec_one(c->mounts[i], "", 2) < 0) die("mount from config");
+    }
+}
+
+/* P3.1: --ulimit name=soft[:hard]. Only the names Docker commonly exposes. */
+static int rlimit_resource(const char *name, int *res) {
+    static const struct { const char *n; int r; } map[] = {
+        { "nofile", RLIMIT_NOFILE }, { "fsize", RLIMIT_FSIZE },
+        { "nproc", RLIMIT_NPROC },  { "core", RLIMIT_CORE },
+        { "stack", RLIMIT_STACK },  { "cpu", RLIMIT_CPU },
+        { "as", RLIMIT_AS },        { "memlock", RLIMIT_MEMLOCK },
+        { "msgqueue", RLIMIT_MSGQUEUE }, { "nice", RLIMIT_NICE },
+        { "rtprio", RLIMIT_RTPRIO },
+    };
+    for (size_t i = 0; i < sizeof map / sizeof map[0]; i++)
+        if (strcmp(name, map[i].n) == 0) { *res = map[i].r; return 0; }
+    return -1;
+}
+
+static void namespace_apply_ulimits(struct cfg *c) {
+    for (int i = 0; i < c->nulimits; i++) {
+        char buf[BUF_SIZE_MEDIUM];
+        snprintf(buf, sizeof buf, "%s", c->ulimits[i]);
+        char *eq = strchr(buf, '=');
+        if (!eq) die("--ulimit wants name=soft[:hard]");
+        *eq = 0;
+        int res = 0;
+        if (rlimit_resource(buf, &res) < 0)
+            die("--ulimit: unknown limit name");
+        char *soft = eq + 1, *hard = strchr(soft, ':');
+        if (hard) *hard++ = 0;
+        errno = 0;
+        char *end = NULL;
+        unsigned long long s = strtoull(soft, &end, 10);
+        if (errno || end == soft || *end) die("--ulimit: bad soft value");
+        unsigned long long h = hard ? strtoull(hard, &end, 10) : s;
+        if (hard && (errno || end == hard || *end)) die("--ulimit: bad hard value");
+        if (h == 0) h = s;
+        struct rlimit rl = { .rlim_cur = (rlim_t)s, .rlim_max = (rlim_t)h };
+        if (setrlimit(res, &rl) < 0) {
+            fprintf(stderr, "minicontainer: --ulimit %s: %s\n", c->ulimits[i], strerror(errno));
+            die("--ulimit");
+        }
     }
 }
 
@@ -347,9 +498,13 @@ int namespace_remount_ro(const char *rootfs) {
     return 0;
 }
 
-void namespace_install_seccomp(int seccomp_mode) {
+void namespace_install_seccomp(int seccomp_mode, const char *profile) {
     if (seccomp_mode == 1) install_filter_strict();
     else if (seccomp_mode == 0) install_filter();
+    else if (seccomp_mode == SECCOMP_MODE_PROFILE) {
+        if (!profile || seccomp_install_profile(profile) < 0)
+            die("--seccomp profile");
+    }
     /* mode 2 (off): no filter installed */
 }
 
@@ -379,9 +534,43 @@ void namespace_child_setup(struct cfg *c, int detach) {
 
     namespace_setup_rootfs(c->rootfs, c->read_only, c->hostname);
     namespace_setup_dev(c->rootfs);
+    /* P3.8: bind a static qemu into /dev before chroot when --emulate. */
+    namespace_setup_emulator(c);
+    /* P3.6: a host-side profile path is unreachable after chroot. */
+    if (c->seccomp_mode == SECCOMP_MODE_PROFILE && c->seccomp_profile) {
+        char dst[PATH_MAX + BUF_SIZE_SMALL];
+        if (path_join(dst, sizeof dst, c->rootfs, "dev/.mc-seccomp.json") < 0)
+            die("--seccomp profile path too long");
+        int in = open(c->seccomp_profile, O_RDONLY | O_CLOEXEC);
+        int out = in >= 0 ? open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW | O_CLOEXEC, 0600) : -1;
+        if (in < 0 || out < 0) {
+            fprintf(stderr, "minicontainer: --seccomp: cannot copy %s: %s\n",
+                    c->seccomp_profile, strerror(errno));
+            die("--seccomp profile");
+        }
+        char b[BUF_SIZE_XXLARGE];
+        ssize_t r;
+        while ((r = read(in, b, sizeof b)) > 0) {
+            for (ssize_t off = 0; off < r;) {
+                ssize_t w = write(out, b + off, (size_t)(r - off));
+                if (w < 0) { if (errno == EINTR) continue; r = -1; break; }
+                off += w;
+            }
+            if (r < 0) break;
+        }
+        close(in);
+        close(out);
+        if (r < 0) die("--seccomp profile copy");
+        c->seccomp_profile = "/dev/.mc-seccomp.json";
+    }
+    /* P3.7: build /etc/hosts while the host state dir is still visible. */
+    namespace_prepare_hosts(c);
+    /* -v / --mount bind: the source is a host path, so mount before chroot. */
+    namespace_apply_bind_mounts(c);
 
     namespace_chroot(c->rootfs);
     namespace_setup_dns(c->net);
+    namespace_setup_hosts(c->net);
     namespace_mount_proc();
     namespace_apply_mounts(c);
 
@@ -404,9 +593,103 @@ void namespace_child_setup(struct cfg *c, int detach) {
         setrlimit(RLIMIT_FSIZE, &rl);
     }
 
+    /* P3.1: rlimits before seccomp so setrlimit is never filtered. */
+    namespace_apply_ulimits(c);
+
     /* Drop setup capabilities only after all mounts, mknod, and chroot work. */
     namespace_drop_capabilities();
 
     /* Install seccomp filter AFTER setup, BEFORE execvp */
-    namespace_install_seccomp(c->seccomp_mode);
+    namespace_install_seccomp(c->seccomp_mode, c->seccomp_profile);
+}
+
+/* P3.7: bridge peers resolve by container name. The file is prepared before
+ * chroot (state lives on the host) and bind-mounted over /etc/hosts after. */
+void namespace_prepare_hosts(const struct cfg *c) {
+    if (!c->net || strcmp(c->net, "bridge") != 0) return;
+
+    char path[PATH_MAX + BUF_SIZE_SMALL];
+    if (path_join(path, sizeof path, c->rootfs, "dev/.mc-hosts") < 0) return;
+
+    FILE *out = fopen(path, "w");
+    if (!out) {
+        fprintf(stderr, "minicontainer: cannot prepare /etc/hosts: %s\n", strerror(errno));
+        return;
+    }
+    fputs("127.0.0.1 localhost\n::1 localhost\n", out);
+
+    /* Existing rootfs /etc/hosts entries stay valid. */
+    char hp[PATH_MAX + BUF_SIZE_SMALL];
+    if (path_join(hp, sizeof hp, c->rootfs, "etc/hosts") == 0) {
+        FILE *in = fopen(hp, "r");
+        if (in) {
+            char line[BUF_SIZE_MEDIUM];
+            while (fgets(line, sizeof line, in))
+                if (line[0] && line[0] != '\n') fputs(line, out);
+            fclose(in);
+        }
+    }
+
+    DIR *d = opendir(STATE_BASE);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            if (c->name && strcmp(e->d_name, c->name) == 0) continue;
+            if (!valid_name(e->d_name)) continue;
+            char ipf[PATH_MAX + BUF_SIZE_SMALL], ip[BUF_SIZE_SMALL];
+            if (fmt_path(ipf, sizeof ipf, STATE_BASE "/%s/ip", e->d_name) < 0) continue;
+            if (read_small(ipf, ip, sizeof ip) < 0) continue;
+            fprintf(out, "%s %s\n", ip, e->d_name);
+        }
+        closedir(d);
+    }
+    if (fclose(out) != 0)
+        fprintf(stderr, "minicontainer: cannot write /etc/hosts: %s\n", strerror(errno));
+}
+
+void namespace_setup_hosts(const char *net) {
+    if (!net || strcmp(net, "bridge") != 0) return;
+    struct stat st;
+    if (lstat("/etc", &st) < 0 && errno == ENOENT && mkdir("/etc", 0755) < 0) {
+        fprintf(stderr, "minicontainer: cannot create /etc for hosts: %s\n", strerror(errno));
+        return;
+    }
+    if (lstat("/etc/hosts", &st) == 0 && S_ISLNK(st.st_mode)) {
+        fprintf(stderr, "minicontainer: refusing symlinked /etc/hosts\n");
+        return;
+    }
+    if (lstat("/etc/hosts", &st) < 0) {
+        if (errno == ENOENT) {
+            int fd = open("/etc/hosts", O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW, 0644);
+            if (fd < 0) {
+                fprintf(stderr, "minicontainer: cannot create /etc/hosts: %s\n", strerror(errno));
+                return;
+            }
+            close(fd);
+        } else {
+            fprintf(stderr, "minicontainer: cannot inspect /etc/hosts: %s\n", strerror(errno));
+            return;
+        }
+    }
+    if (mount("/dev/.mc-hosts", "/etc/hosts", NULL, MS_BIND, NULL) < 0)
+        fprintf(stderr, "minicontainer: cannot install /etc/hosts: %s\n", strerror(errno));
+}
+
+/* P3.8: --emulate. do_run picks the qemu binary and stores its host path in
+ * emulate_arch; bind it into the container dev tmpfs before chroot. */
+void namespace_setup_emulator(const struct cfg *c) {
+    if (!c->emulate_arch[0]) return;
+    char dst[PATH_MAX + BUF_SIZE_SMALL];
+    if (path_join(dst, sizeof dst, c->rootfs, "dev/.mc-qemu") < 0) return;
+    int fd = open(dst, O_WRONLY | O_CREAT | O_TRUNC | O_NOFOLLOW, 0755);
+    if (fd < 0) {
+        fprintf(stderr, "minicontainer: --emulate: cannot create %s: %s\n", dst, strerror(errno));
+        die("--emulate");
+    }
+    close(fd);
+    if (mount(c->emulate_arch, dst, NULL, MS_BIND, NULL) < 0) {
+        fprintf(stderr, "minicontainer: --emulate: bind %s: %s\n", c->emulate_arch, strerror(errno));
+        die("--emulate");
+    }
 }

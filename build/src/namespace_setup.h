@@ -20,6 +20,7 @@ void namespace_chroot(const char *rootfs);
 /* Mount /proc inside the chroot. */
 void namespace_mount_proc(void);
 void namespace_apply_mounts(struct cfg *c);
+void namespace_apply_bind_mounts(struct cfg *c);
 void namespace_setup_identity(struct cfg *c);
 
 /* Remount rootfs read-only after /proc is mounted (inside chroot).
@@ -28,10 +29,12 @@ int namespace_remount_ro(const char *rootfs);
 
 /* Install seccomp filter based on mode:
  * 0 = default deny-list, 1 = strict allow-list, 2 = off. */
-void namespace_install_seccomp(int seccomp_mode);
+void namespace_install_seccomp(int seccomp_mode, const char *profile);
 void namespace_drop_capabilities(void);
 
 /* Full setup sequence for child_fn (convenience function).
  * Calls all the above in the correct order. */
 void namespace_child_setup(struct cfg *c, int detach);
 void namespace_setup_dns(const char *net);
+void namespace_prepare_hosts(const struct cfg *c);
+void namespace_setup_emulator(const struct cfg *c);

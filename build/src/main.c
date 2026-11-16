@@ -149,6 +149,27 @@ int main(int argc, char **argv) {
         argc = an;
         argv = av;
     }
+    if (argc >= 3 && strcmp(argv[1], "inspect") == 0) {
+        int json = 0;
+        for (int i = 3; i < argc; i++) {
+            if (strcmp(argv[i], "--json") == 0) json = 1;
+            else { fprintf(stderr, "Usage: %s inspect <id> [--json]\n", argv[0]); return 1; }
+        }
+        return do_inspect(argv[2], json);
+    }
+    if (argc == 3 && strcmp(argv[1], "start") == 0)
+        return do_start(argv[2]);
+    if (argc == 3 && strcmp(argv[1], "restart") == 0) {
+        int rc = do_stop(argv[2], 3);
+        if (rc != 0) return rc;
+        return do_start(argv[2]);
+    }
+    if (argc == 4 && strcmp(argv[1], "cp") == 0)
+        return do_cp(argv[2], argv[3]);
+    if (argc >= 2 && strcmp(argv[1], "cp") == 0) {
+        fprintf(stderr, "Usage: %s cp <id>:<path> <path>  |  cp <path> <id>:<path>\n", argv[0]);
+        return 1;
+    }
     if (argc >= 4 && strcmp(argv[1], "exec") == 0)
         return do_exec(argv[2], &argv[3]);
     if (argc == 3 && strcmp(argv[1], "exec") == 0) {
@@ -169,6 +190,8 @@ int main(int argc, char **argv) {
     struct cfg c = { .ram = -1, .cpu = -1, .pids = 64, .io = -1, .max_disk = -1, .detach = 0, .name = NULL,
                      .rootfs = NULL, .image = NULL,
                      .net = "host", .hostname = "minicontainer-os", .cmd = NULL };
+    c.orig_argc = argc;
+    c.orig_argv = argv;
     parse_args(argc, argv, &c);
     if (!c.rootfs && !c.image) c.rootfs = "/opt/rootfs";
     validate_input(&c);

@@ -99,6 +99,8 @@ struct cgroup_v2_cfg {
     int cpu;
     long pids;
     long io;
+    long memory_high;   /* P3.5: soft limit (memory.high) */
+    long cpu_weight;    /* P3.5: cpu.weight 1..10000 */
     const char *rootfs;
 };
 
@@ -126,7 +128,25 @@ struct cfg {
     int seccomp_mode;   /* 0=default deny-list, 1=strict allow-list, 2=off */
     char **publish;      /* "hostport:containerport", NULL-terminated */
     int npublish;
+    /* P3 */
+    int rm_after;        /* --rm: drop state when the container exits */
+    int init_enabled;    /* --init: PID 1 reaper for apps that do not reap */
+    int emulate;         /* --emulate: run a foreign-arch rootfs through qemu */
+    const char *restart; /* --restart=no|on-failure|always */
+    long memory_high;    /* --memory-high: soft limit (memory.high) */
+    long cpu_weight;     /* --cpu-weight: 1..10000 (cpu.weight) */
+    char **ulimits;      /* --ulimit name=soft[:hard] */
+    int nulimits;
+    char **orig_argv;    /* untouched argv, saved so `start` can replay it */
+    int orig_argc;
+    char emulate_arch[BUF_SIZE_SMALL]; /* filled by do_run when --emulate */
+    const char *seccomp_profile; /* --seccomp=FILE.json (OCI seccomp profile) */
+    int reuse_state;     /* start: reuse the existing state dir of a stopped container */
+    char **base_cmd;     /* original argv when --emulate wraps it with qemu */
 };
+
+#define SECCOMP_MODE_PROFILE 3
+#define SECCOMP_PROFILE_MAX_RULES 1400
 
 struct child_arg {
     struct cfg *c;
@@ -186,6 +206,11 @@ int do_ps(int json);
 int do_stop(const char *id, int timeout);
 int do_rm(const char *id, int force);
 int do_gc(int dry);
+int do_inspect(const char *id, int json);
+int do_start(const char *id);
+int do_cp(const char *src, const char *dst);
+int state_save_run_config(const char *dir, const struct cfg *c);
+int state_open_pid(const char *id, pid_t *pid, char *dir, size_t dirn);
 
 /* json.c — jsmn helpers (jsmntok_t is `struct jsmntok`, see jsmn.h). */
 struct jsmntok;
@@ -258,6 +283,7 @@ int bridge_setup(pid_t child, struct bridge_cfg *bc, char **publish, int npublis
 void bridge_teardown(pid_t child, char **publish, int npublish);
 int bridge_configure(const struct bridge_cfg *bc);
 int netns_lo_up(void);
+int netns_allow_low_ports(void);
 
 /* Bridge config serialization over pipe (ABI-safe) */
 int bridge_cfg_write(int fd, const struct bridge_cfg *bc);
@@ -272,5 +298,9 @@ void namespace_mount_proc(void);
 void namespace_apply_mounts(struct cfg *c);
 void namespace_setup_identity(struct cfg *c);
 int namespace_remount_ro(const char *rootfs);
-void namespace_install_seccomp(int seccomp_mode);
+void namespace_install_seccomp(int seccomp_mode, const char *profile);
 void namespace_child_setup(struct cfg *c, int detach);
+void namespace_setup_hosts(const char *net);
+void namespace_setup_emulator(const struct cfg *c);
+int namespace_prepare_filesystem(struct cfg *c);
+int seccomp_install_profile(const char *path);

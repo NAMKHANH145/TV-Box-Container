@@ -1,5 +1,49 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0f. PLAN_FINAL v2.0 — Phase P3 (runtime-spec + CLI parity) trên laptop — 2026-11-16
+
+Đã xong P3.1–P3.7 và P3.9–P3.12. P3.8 (`--emulate`) có code nhưng **chưa chạy** trong phiên này
+(không có rootfs ngoại arch + qemu path trong test). Không có box, nên toàn bộ số dưới đây là
+x86_64; binary aarch64 chỉ được cross-build, **chưa thực thi**.
+
+**Kết quả: PASS=156 FAIL=0 SKIP=7 TONG=163** — `build/local-test.sh`, binary glibc x86_64 static
+(sha256 `8e83c366e3265db2e5bf127bce13ad5f9328e4e4a4c313d9d9781d75fe2890c9`), trong container
+Ubuntu 24.04 privileged, kernel host `6.8.0-124-generic`, cgroup v2. Cgroup root của container
+được dời process vào `mc-host` trước khi chạy để bật `cpu/memory/pids/io` (điều kiện
+"no internal process" của cgroup v2).
+
+| Mục | Case đã xanh |
+|---|---|
+| P3.1 rlimits | `--ulimit nofile=32:32` → `ulimit -n` = 32; tên limit sai bị từ chối |
+| P3.2 inspect/volume | `inspect` JSON có `memory_high`, `status`; `-v HOST:/mnt` ghi được file ra host; `start` khi đang chạy bị từ chối |
+| P3.3 port <1024 | trong netns isolated: `/proc/sys/net/ipv4/ip_unprivileged_port_start` = 0 |
+| P3.4 UDP publish | `-p 15353:53/udp` tạo rule DNAT trong `iptables -t nat PREROUTING` |
+| P3.5 memory.high/cpu.weight | file cgroup ghi đúng `16777216` / `200` |
+| P3.6 seccomp JSON | profile tự tạo `defaultAction=ALLOW` + `mount=ERRNO`: `mount` bị chặn, syscall khác chạy |
+| P3.7 /etc/hosts peer | container bridge thứ hai thấy `10.88.x.y <tên-container-thứ-nhất>` trong `/etc/hosts` |
+| P3.9 cp | `cp id:/tmp/f .` và `cp . id:/tmp/f` đúng nội dung; path `..` bị từ chối |
+| P3.10 --init | app thấy `$$ != 1` (reaper giữ PID 1) |
+| P3.11 --rm | sau khi container thoát, `/run/minicontainer/<id>` không còn |
+| P3.12 start/restart | `stop` rồi `start` chạy lại đúng config đã lưu; `restart` = stop + start |
+| --restart | foreground `always` chạy lại 6 lần trong 6 s rồi dừng đúng khi SIGTERM; `on-failure` + exit 0 không restart; keeper detached đổi PID sau khi container exit |
+
+- 7 SKIP: T4 memory-cgroup không được kernel/Docker ép trong môi trường này, T4 wording dmesg,
+  Tio throughput theo storage, 3 case web-proxy profile (thiếu file fixture), P3.8 emulate.
+- Log json-file: warning thiết bị optional (`/dev/console`) được chuyển về stderr host; app chỉ
+  còn đúng 1 dòng stdout + 1 dòng stderr trong log (case tách stream xanh).
+- `-v` bind mount được áp **trước chroot** (nguồn là path host); mount point + `/etc/hosts` do
+  parent (host root) tạo bằng `openat(O_NOFOLLOW)` nên không phụ thuộc quyền của mapped-root.
+- Seccomp JSON: profile được copy vào `/dev/.mc-seccomp.json` trước chroot. Bảng tên syscall là
+  **tập con** (~250 tên phổ biến); profile `default.json` đầy đủ của Docker **chưa chạy** trong
+  phiên này.
+- Kích thước aarch64 musl (`-O2`, strip): **292.416 B (285,6 KiB)**, 0 warning; sha256
+  `16e0738e8f6ea853b6c07a3167323c397ea5aae9305e12543bcdd953502fbb76`. P2 là 249,5 KB → +36 KB.
+  Gate P3 `< 240 KB` **không đạt**; vẫn dưới trần CI 300 KB. `-Os`/rút bảng syscall là cách giảm.
+- p50: T7 trên x86_64 = **3 ms**, nhưng đây chỉ là assert `< 500 ms`, không phải phép đo p50
+  trên Cortex-A53. Không tuyên bố đạt gate p50 ≤ 80 ms cho tới khi chạy box.
+- Chưa chạy: 6-image corpus (`nginx`, `redis`, `python`, `node`), `nginx` + `redis` gọi nhau
+  bằng tên, và toàn bộ suite trên phần cứng S905W.
+
 ## 0e. PLAN_FINAL v2.0 — Phase P2 (distribution-spec) trên laptop — 2026-11-16
 
 `registry.c` (~440 dòng): token flow 401 → `WWW-Authenticate: Bearer realm=…` → đổi token →

@@ -28,6 +28,159 @@ static int same_ns(pid_t pid, const char *name) {
     return sa.st_dev == sb.st_dev && sa.st_ino == sb.st_ino;
 }
 
+/* P3.9: copy files in/out of a running container. The copy itself runs in a
+ * forked child after setns(user, mnt) + chroot, so container symlinks can
+ * never be resolved against the host root. Data moves over a pipe. */
+static int cp_relpath(const char *p, char *out, size_t n) {
+    while (*p == '/') p++;
+    if (!*p) return -1;
+    for (const char *s = p; *s;) {
+        const char *e = strchr(s, '/');
+        size_t l = e ? (size_t)(e - s) : strlen(s);
+        if (l == 0 || (l == 1 && s[0] == '.') || (l == 2 && s[0] == '.' && s[1] == '.'))
+            return -1;
+        s = e ? e + 1 : s + l;
+    }
+    if (strlen(p) >= n) return -1;
+    snprintf(out, n, "%s", p);
+    return 0;
+}
+
+static int cp_pid(const char *id, pid_t *pid) {
+    if (!valid_name(id)) return -1;
+    char dir[BUF_SIZE_LARGE], f[PATH_MAX + BUF_SIZE_SMALL], buf[BUF_SIZE_SMALL];
+    if (fmt_path(dir, sizeof dir, STATE_BASE "/%s", id) < 0) return -1;
+    snprintf(f, sizeof f, "%s/pid", dir);
+    if (read_small(f, buf, sizeof buf) < 0) return -1;
+    *pid = (pid_t)atoi(buf);
+    snprintf(f, sizeof f, "/proc/%d/ns/mnt", *pid);
+    return access(f, F_OK) == 0 ? 0 : -1;
+}
+
+static int enter_container_root(pid_t pid) {
+    char rp[BUF_SIZE_SMALL];
+    snprintf(rp, sizeof rp, "/proc/%d/root", pid);
+    int rootfd = open(rp, O_PATH | O_DIRECTORY | O_CLOEXEC);
+    if (rootfd < 0) return -1;
+
+    if (!same_ns(pid, "user")) {
+        int u = open_ns(pid, "user");
+        if (u < 0 || setns(u, 0) < 0) { if (u >= 0) close(u); close(rootfd); return -1; }
+        close(u);
+        if (setresgid(0, 0, 0) < 0 || setresuid(0, 0, 0) < 0) { close(rootfd); return -1; }
+    }
+    int m = open_ns(pid, "mnt");
+    if (m < 0 || setns(m, 0) < 0) { if (m >= 0) close(m); close(rootfd); return -1; }
+    close(m);
+
+    if (fchdir(rootfd) < 0 || chroot(".") < 0 || chdir("/") < 0) { close(rootfd); return -1; }
+    close(rootfd);
+    return 0;
+}
+
+static int copy_fd(int in, int out) {
+    char buf[BUF_SIZE_HUGE];
+    for (;;) {
+        ssize_t r = read(in, buf, sizeof buf);
+        if (r == 0) return 0;
+        if (r < 0) { if (errno == EINTR) continue; return -1; }
+        for (ssize_t off = 0; off < r;) {
+            ssize_t w = write(out, buf + off, (size_t)(r - off));
+            if (w < 0) { if (errno == EINTR) continue; return -1; }
+            off += w;
+        }
+    }
+}
+
+int do_cp(const char *src, const char *dst) {
+    const char *src_colon = strchr(src, ':');
+    const char *dst_colon = strchr(dst, ':');
+    int out = (src_colon && !dst_colon);
+    if (!out && !(dst_colon && !src_colon)) {
+        fprintf(stderr, "Usage: %s cp <id>:<path> <path>  |  cp <path> <id>:<path>\n", "minicontainer");
+        return 1;
+    }
+
+    char id[BUF_SIZE_LARGE], cpath[PATH_MAX];
+    const char *hostpath;
+    if (out) {
+        size_t idl = (size_t)(src_colon - src);
+        if (idl == 0 || idl >= sizeof id) { fprintf(stderr, "invalid container path\n"); return 1; }
+        memcpy(id, src, idl); id[idl] = 0;
+        hostpath = dst;
+    } else {
+        size_t idl = (size_t)(dst_colon - dst);
+        if (idl == 0 || idl >= sizeof id) { fprintf(stderr, "invalid container path\n"); return 1; }
+        memcpy(id, dst, idl); id[idl] = 0;
+        hostpath = src;
+    }
+    if (cp_relpath(out ? src_colon + 1 : dst_colon + 1, cpath, sizeof cpath) < 0) {
+        fprintf(stderr, "minicontainer: cp: path must stay inside the container\n");
+        return 1;
+    }
+    pid_t pid;
+    if (cp_pid(id, &pid) < 0) {
+        fprintf(stderr, "container '%s' is not running\n", id);
+        return 1;
+    }
+
+    int pfd[2];
+    if (pipe(pfd) < 0) die("pipe cp");
+
+    if (out) {
+        int dest = open(hostpath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (dest < 0) { fprintf(stderr, "minicontainer: cp: %s: %s\n", hostpath, strerror(errno)); return 1; }
+        pid_t p = fork();
+        if (p < 0) die("fork cp");
+        if (p == 0) {
+            close(pfd[0]);
+            if (enter_container_root(pid) < 0) { perror("setns cp"); _exit(EXIT_SETUP_ERROR); }
+            int fd = open(cpath, O_RDONLY | O_CLOEXEC);
+            if (fd < 0) { perror(cpath); _exit(EXIT_CHILD_ERROR); }
+            int rc = copy_fd(fd, pfd[1]);
+            close(fd);
+            _exit(rc < 0 ? 1 : 0);
+        }
+        close(pfd[1]);
+        int rc = copy_fd(pfd[0], dest);
+        close(pfd[0]);
+        close(dest);
+        int st = 0;
+        while (waitpid(p, &st, 0) < 0 && errno == EINTR) {}
+        if (rc < 0 || !WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+            unlink(hostpath);
+            fprintf(stderr, "minicontainer: cp: failed\n");
+            return 1;
+        }
+        return 0;
+    }
+
+    int source = open(hostpath, O_RDONLY | O_CLOEXEC);
+    if (source < 0) { fprintf(stderr, "minicontainer: cp: %s: %s\n", hostpath, strerror(errno)); return 1; }
+    pid_t p = fork();
+    if (p < 0) die("fork cp");
+    if (p == 0) {
+        close(pfd[1]);
+        if (enter_container_root(pid) < 0) { perror("setns cp"); _exit(EXIT_SETUP_ERROR); }
+        int fd = open(cpath, O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC, 0644);
+        if (fd < 0) { perror(cpath); _exit(EXIT_CHILD_ERROR); }
+        int rc = copy_fd(pfd[0], fd);
+        close(fd);
+        _exit(rc < 0 ? 1 : 0);
+    }
+    close(pfd[0]);
+    int rc = copy_fd(source, pfd[1]);
+    close(source);
+    close(pfd[1]);
+    int st = 0;
+    while (waitpid(p, &st, 0) < 0 && errno == EINTR) {}
+    if (rc < 0 || !WIFEXITED(st) || WEXITSTATUS(st) != 0) {
+        fprintf(stderr, "minicontainer: cp: failed\n");
+        return 1;
+    }
+    return 0;
+}
+
 int do_exec(const char *id, char **cmd) {
     if (!valid_name(id)) { fprintf(stderr, "invalid container id\n"); return 1; }
     char dir[BUF_SIZE_LARGE], f[PATH_MAX + BUF_SIZE_SMALL], buf[BUF_SIZE_SMALL];
@@ -122,7 +275,7 @@ int do_exec(const char *id, char **cmd) {
             if (errno != EBUSY) _exit(EXIT_SETUP_ERROR);
         }
         namespace_drop_capabilities();
-        namespace_install_seccomp(seccomp_mode);
+        namespace_install_seccomp(seccomp_mode, NULL);
         execvp(cmd[0], cmd);
         fprintf(stderr, "execvp %s: %s\n", cmd[0], strerror(errno));
         _exit(EXIT_CHILD_ERROR);

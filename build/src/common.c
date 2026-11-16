@@ -225,6 +225,10 @@ void validate_input(struct cfg *c) {
         die_msg("--io must be > 0");
     if (c->max_disk != -1 && c->max_disk <= 0)
         die_msg("--disk must be > 0");
+    if (c->rm_after && c->restart && strcmp(c->restart, "no") != 0)
+        die_msg("--rm cannot be combined with --restart");
+    if (c->memory_high > 0 && c->ram > 0 && c->memory_high > c->ram)
+        die_msg("--memory-high must not exceed --ram");
     if (c->rootfs) {
         char p[PATH_MAX + BUF_SIZE_SMALL];
         snprintf(p, sizeof p, "%s/bin/sh", c->rootfs);

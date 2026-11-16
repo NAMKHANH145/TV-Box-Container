@@ -39,6 +39,8 @@ int cgroup_v2_create(const struct cgroup_v2_cfg *cfg, char *cgdir, size_t cgdir_
         snprintf(v, sizeof v, "%ld", cfg->pids);
         write_cgroup_file_die(cgdir, "pids.max", v);
     }
+    cgroup_v2_set_high(cgdir, cfg->memory_high);
+    cgroup_v2_set_weight(cgdir, cfg->cpu_weight);
     if (cfg->io > 0) {
         struct stat st;
         if (stat(cfg->rootfs, &st) < 0) return -1;
@@ -59,6 +61,23 @@ int cgroup_v2_create(const struct cgroup_v2_cfg *cfg, char *cgdir, size_t cgdir_
     if (mkdir(o, 0700) < 0 && errno != EEXIST) return -1;
 
     return 0;
+}
+
+/* P3.5: soft memory limit. memory.high throttles instead of OOM-killing,
+ * which is what large image builds/runs need to avoid a false OOM. */
+int cgroup_v2_set_high(const char *cgdir, long memory_high) {
+    if (memory_high <= 0) return 0;
+    char v[BUF_SIZE_SMALL];
+    snprintf(v, sizeof v, "%ld", memory_high);
+    return write_cgroup_file_die(cgdir, "memory.high", v);
+}
+
+/* P3.5: cpu.weight (1..10000); cpu.max already covers the hard quota. */
+int cgroup_v2_set_weight(const char *cgdir, long cpu_weight) {
+    if (cpu_weight <= 0) return 0;
+    char v[BUF_SIZE_SMALL];
+    snprintf(v, sizeof v, "%ld", cpu_weight);
+    return write_cgroup_file_die(cgdir, "cpu.weight", v);
 }
 
 int cgroup_v2_set_limit(const char *cgdir, const char *controller, const char *value) {
@@ -142,6 +161,8 @@ void cgroup_setup(struct cfg *c, char *cgdir) {
         .cpu = c->cpu,
         .pids = c->pids,
         .io = c->io,
+        .memory_high = c->memory_high,
+        .cpu_weight = c->cpu_weight,
         .rootfs = c->rootfs,
     };
     if (cgroup_v2_create(&v2cfg, cgdir, PATH_MAX) < 0) die("cgroup_v2_create");

@@ -268,6 +268,13 @@ glibc static 620 KB+).
 | P3.12 | `start`: chạy lại container đã dừng từ config đã lưu | `run.c` `state.c` | 80 | `stop` rồi `start` chạy lại đúng lệnh |
 
 **Gate P3:** 6 image; `nginx` + `redis` nói chuyện qua tên; 84/84; < 240 KB; p50 ≤ 80 ms.
+Đo thực tế 2026-11-16 (x86_64, Ubuntu 24.04 privileged container, kernel 6.8.0-124-generic):
+`build/local-test.sh` → **156 PASS / 0 FAIL / 7 SKIP (TONG=163)**; aarch64 musl
+**292.416 bytes (285,6 KiB)**, 0 warning. P3.1–P3.7 và P3.9–P3.12 đều có case riêng xanh;
+P3.8 mới có code, chưa test (cần `qemu-*-static` + rootfs ngoại arch). Gate **< 240 KB không đạt**
+(285,6 KB) nhưng vẫn dưới trần CI 300 KB — nguyên nhân: bảng tên syscall cho seccomp JSON (~987
+dòng) + state/config/cp/init. p50 chưa đo trên box; T7 local chỉ là assert `< 500 ms` (3 ms).
+6-image corpus và `nginx` + `redis` gọi nhau bằng tên **chưa chạy** — chờ box thật.
 
 ### P4 — Vận hành & cập nhật (~850 dòng)
 

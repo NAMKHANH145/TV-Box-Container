@@ -6,6 +6,10 @@
  * Returns 0 on success, -1 on error (errno set). */
 int cgroup_v2_create(const struct cgroup_v2_cfg *cfg, char *cgdir, size_t cgdir_len);
 
+/* Apply optional memory.high / cpu.weight (P3.5). */
+int cgroup_v2_set_high(const char *cgdir, long memory_high);
+int cgroup_v2_set_weight(const char *cgdir, long cpu_weight);
+
 /* Set a single controller limit (memory.max, cpu.max, pids.max, io.max).
  * controller: "memory", "cpu", "pids", "io"
  * value: string value (e.g., "1000000", "20000 100000", "64", "8:0 rbps=1048576 wbps=1048576") */
