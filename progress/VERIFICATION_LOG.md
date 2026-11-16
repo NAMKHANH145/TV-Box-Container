@@ -1168,3 +1168,27 @@ Lệnh y nguyên workflow (`ubuntu:24.04 --privileged`, cgroup delegate, `make C
    đếm — chỉ có thể báo cao, không bao giờ báo thấp).
 4. (kèm) `/dev` mount point cũng phải tạo ở phía host như `/proc`, nếu không slot A/B giải nén từ
    package (không giữ device node) sẽ chết ở `mount /dev`.
+
+---
+
+## Phiên 4 — stranger test + docs + release v2.0.0 (2026-11-17)
+
+### Stranger test (1 command install trên container Ubuntu 24.04 sạch)
+
+- Lệnh cài: `curl -fsSL .../install.sh | sh` → **22 s**, binary `minicontainer 2.0.0 (x86_64, musl, static)`, sha256 `80f61577…`.
+- `minicontainer check`: 2 row ok (memory, disk free).
+- `pull alpine:3.19` + `run --image=alpine-3.19 /bin/sh -c 'cat /etc/alpine-release'` → `3.19.9`.
+- `pull busybox:latest` + `run -d --net=bridge -p 8080:8080 httpd` → **curl_code=200**, body `hello-from-minicontainer`.
+- `ps`/`logs`/`stop`/`rm` đều OK.
+- Tổng thời gian: **174 s**.
+- Xác nhận giới hạn đã ghi vào COMPAT: `nginx:alpine` không chạy được out-of-the-box — lỗi
+  `mkdir() "/var/cache/nginx/client_temp" failed (13: Permission denied)` (initgroups/setgroups
+  EPERM trong mapped-root userns + rootfs không writable). Dùng `recipes/nginx` (đã verify 10/10).
+- Kết luận gate "người lạ cài + chạy nginx trong < 10 phút": đạt với `recipes/nginx` (pull + build + run,
+  < 2 phút); image stock `nginx:alpine` không chạy được — đã ghi rõ trong README + COMPAT.
+
+### Docs
+
+- README: quickstart thêm bước 5 (busybox httpd qua bridge) + блок nginx qua recipe; binary size 277 KB.
+- COMPAT: thêm row "writes inside image rootfs" + "images that drop privileges"; arch count 184/0/1.
+- AGENTS.md: giữ nguyên (không sửa).

@@ -35,7 +35,7 @@ with the command used to check it. If a mandatory row fails, `minicontainer chec
 | Arch | Binary | Status |
 |---|---|---|
 | x86_64 | musl static (CI) / glibc static (local tests) | supported; full local matrix passes |
-| aarch64 | musl static (release) | **verified on S905W** (`6.18.38-meson64`): 182 PASS / 0 FAIL / 1 SKIP of 183 |
+| aarch64 | musl static (release) | **verified on S905W** (`6.18.38-meson64`): 184 PASS / 0 FAIL / 1 SKIP of 185 |
 | armv7l | musl static (CI) | build-only, experimental |
 | riscv64 | musl static (CI) | build-only, experimental |
 | i386 | not released | build may work, unsupported |
@@ -50,6 +50,8 @@ with the command used to check it. If a mandatory row fails, `minicontainer chec
 | overlayfs | used by the image store; `chroot` is used at runtime |
 | `pivot_root` | **not used** — returns `EPERM` under this kernel's userns |
 | read-only rootfs | `--read-only`; writable paths become tmpfs, symlinks are skipped |
+| writes inside an image rootfs | only where the image is world-writable (`/tmp`); the rest is owned by the unmapped host root and returns `EACCES`. Use `-v`, `--mount tmpfs`, or `export`/`import` for writable layers |
+| images that drop privileges (`user nginx;`, Dockerfile `USER`) | **fails at start** — `setgroups`/`initgroups` returns `EPERM` in the mapped-root userns (nginx:alpine errors on `/var/cache/nginx`). Use the shipped `recipes/*` images (`user root; master_process off;`, mosquitto `user root`) or run the binary as root |
 | device nodes inside images | rejected by image extraction; `/dev` is created by the runtime |
 
 ## Networking
@@ -74,6 +76,7 @@ with the command used to check it. If a mandatory row fails, `minicontainer chec
 - GPU, swap accounting, NUMA, device passthrough.
 - Live migration, checkpoint/restore.
 - Docker `default.json` seccomp profiles that reference syscalls outside the built-in name table.
+- Running a container as non-root (`--user <uid≠0`) — see row above; the userns maps exactly one uid.
 
 ## Verified environment
 

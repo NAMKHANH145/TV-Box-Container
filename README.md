@@ -6,7 +6,7 @@ A zero-daemon container runtime in C for small Linux devices — one static bina
 service, no containerd, no runc. It runs OCI/Docker images and rootfs tarballs on a 1.8 GB TV Box
 (Amlogic S905W, aarch64, cgroup v2 only) and on ordinary x86_64 Linux.
 
-**v2.0.0** · aarch64 musl binary **280 KB** · `0 MB` RAM when idle · MIT
+**v2.0.0** · aarch64 musl binary **277 KB** · `0 MB` RAM when idle · MIT
 
 ## Why
 
@@ -39,6 +39,24 @@ sudo minicontainer run -d --name web --image=alpine-3.19 --ram=64M /bin/sleep 30
 sudo minicontainer ps
 sudo minicontainer logs web
 sudo minicontainer stop web && sudo minicontainer rm web
+
+# 5. serve something over the bridge (busybox httpd; ports < 1024 are not bindable)
+sudo minicontainer pull busybox:latest
+sudo minicontainer run -d --name web --image=busybox-latest --ram=32M --net=bridge -p 8080:8080 \
+  /bin/sh -c 'mkdir -p /tmp/www && echo hello > /tmp/www/index.html && exec httpd -f -p 8080 -h /tmp/www'
+curl http://127.0.0.1:8080/
+sudo minicontainer stop web && sudo minicontainer rm web
+```
+
+Need nginx? It drops privileges (`user nginx;`) and fails with `initgroups: EPERM` under the
+mapped-root userns. Use the shipped recipe instead:
+
+```bash
+sudo minicontainer pull nginx:alpine
+sudo minicontainer build -t recipe-nginx:1 recipes/nginx
+sudo minicontainer run -d --name web --image=recipe-nginx:1 --ram=64M --net=bridge -p 8080:8080 \
+  nginx -g 'daemon off;'
+curl -s http://127.0.0.1:8080/ | grep -o 'nginx recipe is running'
 ```
 
 No network? Use a rootfs tarball or an OCI layout on disk:
