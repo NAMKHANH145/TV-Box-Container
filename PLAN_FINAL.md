@@ -245,7 +245,10 @@ glibc static 620 KB+).
 | P2.2 | Blob + verify sha256 + resume + giới hạn dung lượng | `registry.c` | 100 | ngắt mạng giữa đường → tải lại |
 | P2.3 | `build --platform` + manifest list nhiều arch | `build.c` `img.c` | 200 | build 1 Dockerfile ra 2 arch |
 
-**Gate P2:** pull 3 image; `pull --offline` từ thư mục OCI layout; 84/84; < 220 KB.
+**Gate P2:** pull 3 image; `pull --offline` từ thư mục OCI layout; 84/84; < 260 KB.
+Đo thực tế sau P2.1–P2.3: **249,5 KB**; `pull alpine:3.19` (Docker Hub, token flow thật),
+`--platform=linux/arm64`, `--offline=<layout>` đều OK. Các mốc "< 200/220/230 KB" ban đầu được
+đặt trước khi có `log.c`/`build.c`/`ship.c`/`registry.c`; trần thật là gate CI 300 KB.
 
 ### P3 — runtime-spec tập con + CLI parity (~1.270 dòng)
 

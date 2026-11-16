@@ -224,7 +224,8 @@ static long long file_size(const char *p) {
 int do_pull(int argc, char **argv) {
     const char *profile = NULL, *base = NULL, *dest = NULL, *sha = NULL;
     const char *sigkey = NULL;
-    int force = 0, require_sig = 0;
+    const char *platform = NULL, *offdir = NULL;
+    int force = 0, require_sig = 0, offline = 0;
     for (int i = 2; i < argc; i++) {
         const char *a = argv[i];
         if (strncmp(a, "--url=", 6) == 0) base = a + 6;
@@ -235,14 +236,34 @@ int do_pull(int argc, char **argv) {
         else if (strcmp(a, "--sha256") == 0 && i + 1 < argc) sha = argv[++i];
         else if (strncmp(a, "--sig=", 6) == 0) { sigkey = a + 6; require_sig = 1; }
         else if (strcmp(a, "--sig") == 0 && i + 1 < argc) { sigkey = argv[++i]; require_sig = 1; }
+        else if (strncmp(a, "--platform=", 11) == 0) platform = a + 11;
+        else if (strcmp(a, "--platform") == 0 && i + 1 < argc) platform = argv[++i];
+        else if (strncmp(a, "--offline=", 10) == 0) { offline = 1; offdir = a + 10; }
+        else if (strcmp(a, "--offline") == 0) offline = 1;
         else if (strcmp(a, "--require-signature") == 0) require_sig = 1;
         else if (strcmp(a, "--force") == 0) force = 1;
-        else if (!profile && valid_name(a)) profile = a;
+        else if (!profile && (valid_name(a) || strchr(a, '/'))) profile = a;
         else { fprintf(stderr, "minicontainer: pull: unknown parameter: %s\n", a); return 1; }
     }
+
+    /* P2: `pull alpine:3.19` talks to a registry; `pull --offline=DIR` installs
+     * an OCI layout that is already on disk. Profiles keep the old meaning
+     * (they never contain ':' or '/'), so both spellings coexist. */
+    if (offline) {
+        const char *d = (offdir && *offdir) ? offdir : profile;
+        if (!d) {
+            fprintf(stderr, "minicontainer: pull: --offline can duong dan toi OCI layout\n");
+            return 1;
+        }
+        return img_install(d, NULL);
+    }
+    if (profile && !base && (strchr(profile, ':') || strchr(profile, '/')))
+        return do_pull_registry(profile, platform);
     if (!profile) {
         fprintf(stderr, "Usage: %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM]\n"
                         "                    [--require-signature] [--sig=PUBKEY] [--force]\n", argv[0]);
+        fprintf(stderr, "       %s pull <image>[:tag] [--platform=linux/arm64]   (tu registry)\n", argv[0]);
+        fprintf(stderr, "       %s pull --offline=<dir-oci-layout>\n", argv[0]);
         fprintf(stderr, "  profile: base-mini | iot-gateway | python-edge | web-proxy\n");
         return 1;
     }

@@ -149,7 +149,15 @@ int img_load(const char *file, const char *tag_override) {
         run_wait(rav);
         return 1;
     }
+    int rc = img_install(stage, tag_override);
+    char *const rav[] = { "/usr/bin/rm", "-rf", stage, NULL };
+    run_wait(rav);
+    return rc;
+}
 
+/* Install an already-unpacked OCI layout / docker-save tree (P2: the registry
+ * client downloads blobs straight into this shape, so it never re-tars). */
+int img_install(const char *stage, const char *tag_override) {
     char mpath[PATH_MAX], ipath[PATH_MAX];
     fmt_path(mpath, sizeof mpath, "%s/manifest.json", stage);
     fmt_path(ipath, sizeof ipath, "%s/index.json", stage);
@@ -251,7 +259,7 @@ picked: {
             goto out;
         }
     } else {
-        fprintf(stderr, "minicontainer: load: %s is not a docker-save or OCI archive\n", file);
+        fprintf(stderr, "minicontainer: load: %s khong co manifest.json hay index.json\n", stage);
         goto out;
     }
 
@@ -316,7 +324,7 @@ picked: {
     for (int i = 0; i < nlayers; i++) {
         char full[PATH_MAX];
         fmt_path(full, sizeof full, "%s/%s", stage, layers[i]);
-        printf("load: layer %d/%d\n", i + 1, nlayers);
+        printf("  layer %d/%d\n", i + 1, nlayers);
         if (layer_apply(full, rootfs) < 0) {
             fprintf(stderr, "minicontainer: load: layer %d failed\n", i + 1);
             char *const rav[] = { "/usr/bin/rm", "-rf", dir, NULL };
@@ -351,7 +359,7 @@ picked: {
         fmt_path(meta, sizeof meta, "%s/meta", dir);
         fmt_path(line, sizeof line, "name=%s\ntag=%s\narch=%s\nlayers=%d\n", name, ref, arch, nlayers);
         write_file(meta, line);
-        printf("load: %s -> %s (%s, %d layer%s)\n", ref, name,
+        printf("image: %s -> %s (%s, %d layer%s)\n", ref, name,
                arch[0] ? arch : MC_ARCH, nlayers, nlayers == 1 ? "" : "s");
         if (arch[0] && strcmp(arch, MC_ARCH) != 0)
             fprintf(stderr, "minicontainer: load: canh bao: image la %s, may nay la %s\n", arch, MC_ARCH);
@@ -362,10 +370,6 @@ picked: {
     rc = 0;
 
 out:
-    {
-        char *const rav[] = { "/usr/bin/rm", "-rf", stage, NULL };
-        run_wait(rav);
-    }
     return rc;
 }
 

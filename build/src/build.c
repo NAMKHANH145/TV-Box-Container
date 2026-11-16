@@ -1,14 +1,17 @@
 /* build.c — Dockerfile subset -> image in the store.
  *
- * Supported: FROM, ARG, ENV, WORKDIR, COPY, ADD (local), RUN, CMD, ENTRYPOINT,
- *            USER, EXPOSE, VOLUME, LABEL (ignored), comments and line
- *            continuations.
- * Not supported (warned): multi-stage, ONBUILD, HEALTHCHECK, SHELL, FROM --platform,
+ * Supported: FROM (with --platform=), ARG, ENV, WORKDIR, COPY, ADD (local),
+ *            RUN, CMD, ENTRYPOINT, USER, EXPOSE, VOLUME, LABEL (ignored),
+ *            comments and line continuations.
+ * Not supported (warned): multi-stage, ONBUILD, HEALTHCHECK, SHELL,
  *            remote ADD, .dockerignore.
  *
  * Each RUN executes /bin/sh -c inside the build rootfs in a private mount
  * namespace (proc + /dev bind). Results are cached per instruction key so a
  * rebuild after the last step is cheap; --no-cache forces a fresh run.
+ *
+ * --platform only picks the target arch: RUN for a foreign arch needs
+ * binfmt_misc + qemu-user, otherwise it fails with exit 127 and a hint.
  */
 #include "common.h"
 #include <ctype.h>
@@ -27,7 +30,39 @@ struct bstate {
     char *entry[BUILD_MAX_ARGS + 1];
     int nentry;
     char base_key[32];
+    char arch[BUF_SIZE_SMALL];          /* target arch of the image being built */
 };
+
+/* Read arch= out of an image's meta file. */
+static int img_arch(const char *name, char *out, size_t n) {
+    char meta[PATH_MAX], line[BUF_SIZE_MEDIUM];
+    fmt_path(meta, sizeof meta, "%s/images/%s/meta", img_base(), name);
+    FILE *f = fopen(meta, "r");
+    if (!f) return -1;
+    int rc = -1;
+    while (fgets(line, sizeof line, f)) {
+        if (strncmp(line, "arch=", 5) == 0) {
+            char *nl = strchr(line + 5, '\n');
+            if (nl) *nl = 0;
+            fmt_path(out, n, "%s", line + 5);
+            rc = 0;
+            break;
+        }
+    }
+    fclose(f);
+    return rc;
+}
+
+/* OCI platform name -> the name the rest of the tool prints. */
+static void platform_arch(const char *p, char *out, size_t n) {
+    const char *s = strchr(p, '/');
+    s = s ? s + 1 : p;
+    if (strcmp(s, "amd64") == 0) s = "x86_64";
+    else if (strcmp(s, "arm64") == 0) s = "aarch64";
+    else if (strcmp(s, "arm") == 0 || strcmp(s, "armv7") == 0) s = "armv7l";
+    else if (strcmp(s, "386") == 0) s = "i386";
+    fmt_path(out, n, "%s", s);
+}
 
 static unsigned long long fnv(const char *s, unsigned long long h) {
     for (; *s; s++) { h ^= (unsigned char)*s; h *= 1099511628211ULL; }
@@ -53,21 +88,33 @@ static int run_in_rootfs(struct bstate *b, const char *cmd) {
     pid_t p = fork();
     if (p < 0) return -1;
     if (p == 0) {
-        if (unshare(CLONE_NEWNS) < 0) _exit(125);
+        if (unshare(CLONE_NEWNS) < 0) {
+            fprintf(stderr, "minicontainer: build: RUN can root (unshare: %s)\n", strerror(errno));
+            _exit(125);
+        }
         mount(NULL, "/", NULL, MS_REC | MS_PRIVATE, NULL);
         char pth[PATH_MAX], dv[PATH_MAX], rc[PATH_MAX];
         fmt_path(pth, sizeof pth, "%s/proc", b->rootfs);
         mkdir(pth, 0555);
-        if (mount("proc", pth, "proc", 0, NULL) < 0 && errno != EBUSY) _exit(125);
+        if (mount("proc", pth, "proc", 0, NULL) < 0 && errno != EBUSY) {
+            fprintf(stderr, "minicontainer: build: mount proc: %s\n", strerror(errno));
+            _exit(125);
+        }
         fmt_path(dv, sizeof dv, "%s/dev", b->rootfs);
         mkdir(dv, 0755);
-        if (mount("/dev", dv, NULL, MS_BIND | MS_REC, NULL) < 0) _exit(125);
+        if (mount("/dev", dv, NULL, MS_BIND | MS_REC, NULL) < 0) {
+            fprintf(stderr, "minicontainer: build: bind /dev: %s\n", strerror(errno));
+            _exit(125);
+        }
         fmt_path(rc, sizeof rc, "%s/etc", b->rootfs);
         mkdir(rc, 0755);
         fmt_path(rc, sizeof rc, "%s/etc/resolv.conf", b->rootfs);
         char *const cpa[] = { "/usr/bin/cp", "-f", "/etc/resolv.conf", rc, NULL };
         run_wait(cpa);                       /* best effort: DNS for RUN */
-        if (chroot(b->rootfs) < 0) _exit(125);
+        if (chroot(b->rootfs) < 0) {
+            fprintf(stderr, "minicontainer: build: chroot: %s\n", strerror(errno));
+            _exit(125);
+        }
         if (chdir(b->workdir[0] ? b->workdir : "/") < 0 && chdir("/") < 0) _exit(125);
         setenv("PATH", "/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin", 1);
         for (int i = 0; i < b->nenv; i++) {
@@ -217,16 +264,22 @@ static int split_words(const char *s, char *out[], int max, char *storage, size_
 }
 
 int do_build(int argc, char **argv) {
-    const char *tag = NULL, *file = "Dockerfile", *context = ".";
+    const char *tag = NULL, *file = "Dockerfile", *context = ".", *platform = NULL;
     int no_cache = 0;
     for (int i = 2; i < argc; i++) {
         if (strcmp(argv[i], "-t") == 0 && i + 1 < argc) tag = argv[++i];
         else if (strncmp(argv[i], "-t", 2) == 0 && argv[i][2]) tag = argv[i] + 2;
         else if (strcmp(argv[i], "-f") == 0 && i + 1 < argc) file = argv[++i];
+        else if (strncmp(argv[i], "--platform=", 11) == 0) platform = argv[i] + 11;
+        else if (strcmp(argv[i], "--platform") == 0 && i + 1 < argc) platform = argv[++i];
         else if (strcmp(argv[i], "--no-cache") == 0) no_cache = 1;
         else if (argv[i][0] != '-') context = argv[i];
     }
-    if (!tag) { fprintf(stderr, "Usage: %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache] CONTEXT\n", argv[0]); return 1; }
+    if (!tag) {
+        fprintf(stderr, "Usage: %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache]"
+                        " [--platform=linux/arm64] CONTEXT\n", argv[0]);
+        return 1;
+    }
 
     char dfpath[PATH_MAX];
     if (file[0] == '/') fmt_path(dfpath, sizeof dfpath, "%s", file);
@@ -237,6 +290,8 @@ int do_build(int argc, char **argv) {
     /* state */
     static struct bstate b;
     memset(&b, 0, sizeof b);
+    fmt_path(b.arch, sizeof b.arch, "%s", MC_ARCH);
+    if (platform && *platform) platform_arch(platform, b.arch, sizeof b.arch);
     b.env = malloc(sizeof(char *) * (BUILD_MAX_ENV + 1));
     if (!b.env) { fclose(df); return 1; }
     b.env[0] = NULL;
@@ -276,6 +331,16 @@ int do_build(int argc, char **argv) {
         while (*rest == ' ') rest++;
 
         if (strcasecmp(line, "FROM") == 0) {
+            /* FROM --platform=linux/arm64 base */
+            if (strncmp(rest, "--platform=", 11) == 0) {
+                char *sp2 = strchr(rest, ' ');
+                if (sp2) {
+                    *sp2 = '\0';
+                    if (!platform) platform_arch(rest + 11, b.arch, sizeof b.arch);
+                    rest = sp2 + 1;
+                    while (*rest == ' ') rest++;
+                }
+            }
             char basev[PATH_MAX];
             expand(&b, rest, basev, sizeof basev);
             char *as = strcasestr(basev, " as ");
@@ -305,7 +370,13 @@ int do_build(int argc, char **argv) {
             }
             fmt_path(b.base_key, sizeof b.base_key, "%s", name);
             have_base = 1;
-            printf("build: FROM %s\n", basev);
+            /* Without an explicit --platform the image inherits the base arch,
+             * so building an aarch64 base on x86_64 stays aarch64. */
+            if (!platform) {
+                char ba[BUF_SIZE_SMALL];
+                if (img_arch(name, ba, sizeof ba) == 0) fmt_path(b.arch, sizeof b.arch, "%s", ba);
+            }
+            printf("build: FROM %s (%s)\n", basev, b.arch);
             continue;
         }
         if (!have_base) {
@@ -369,6 +440,10 @@ int do_build(int argc, char **argv) {
             int st = run_in_rootfs(&b, cmd);
             if (st != 0) {
                 fprintf(stderr, "minicontainer: build: RUN failed (exit %d)\n", st);
+                if (strcmp(b.arch, MC_ARCH) != 0)
+                    fprintf(stderr, "minicontainer: build: image la %s, may nay la %s — can"
+                                    " binfmt_misc + qemu-%s de chay RUN (xem P3.8)\n",
+                            b.arch, MC_ARCH, b.arch);
                 rc = 1;
                 break;
             }
@@ -468,9 +543,9 @@ int do_build(int argc, char **argv) {
     char meta[PATH_MAX], line2[BUF_SIZE_LARGE];
     fmt_path(meta, sizeof meta, "%s/meta", dir);
     fmt_path(line2, sizeof line2, "name=%s\ntag=%s\narch=%s\nlayers=1\nbuilt=%ld\n",
-             name, ref, MC_ARCH, (long)time(NULL));
+             name, ref, b.arch, (long)time(NULL));
     write_file(meta, line2);
-    printf("build: %s -> %s (%s)\n", ref, name, MC_ARCH);
+    printf("build: %s -> %s (%s)\n", ref, name, b.arch);
     printf("  run: minicontainer run --image=%s\n", name);
     for (int i = 0; i < b.nenv; i++) free(b.env[i]);
     free(b.env);

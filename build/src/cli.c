@@ -120,10 +120,11 @@ void print_usage(const char *prog) {
 		"       %s logs [-f] [--tail=N] <id> | gc [--dry-run] |\n"
 		"       %s oci-run <bundle> | service create <name> <cmd> [args...] |\n"
 		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] [--require-signature] [--sig=PUBKEY] |\n"
+		"       %s pull <image>[:tag] [--platform=linux/arm64] | pull --offline=<oci-layout-dir> |\n"
 		"       %s sdk init <dir> [--profile=P] [--ram=32M] | sdk pack <dir> [-o OUT] [--force] |\n"
 		"       %s check [--json] |\n"
 		"       %s load <file.tar> [--tag=NAME] | images [--json] | rmi <name> | save <name> -o <file.tar> |\n"
-		"       %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache] CONTEXT |\n"
+		"       %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache] [--platform=linux/arm64] CONTEXT |\n"
 		"       %s export <image> -o <bundle.tar.gz> | import <bundle> [--verify=PUBKEY] |\n"
-		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog, prog, prog);
+		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog);
 }

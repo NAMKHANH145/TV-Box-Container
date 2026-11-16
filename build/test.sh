@@ -428,6 +428,23 @@ t "import: bundle bi sua bi tu choi" sh -c "mkdir -p $XB/t && tar -xzf $XB/b.tgz
 t "import --verify: thieu .sig bi tu choi" sh -c "! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
 t "import --verify: sig sai bi tu choi" sh -c "cp $FX/signed-rootfs.tar.gz.sig $XB/b.tgz.sig && ! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
 rm -rf $XB
+echo "=== P2: pull tu registry + --platform ==="
+if curl -sS -m 10 -o /dev/null https://registry-1.docker.io/v2/ 2>/dev/null; then
+  t "pull registry: alpine:3.19" sh -c "$MC pull alpine:3.19 >/dev/null && $MC images | grep -q '^alpine-3.19'"
+  t "pull registry: chay duoc image vua tai" sh -c "$MC run --image=alpine-3.19 /bin/sh -c 'cat /etc/alpine-release' | grep -q '^3\\.19'"
+  t "pull registry: --platform arm64 chon dung bien the" sh -c "$MC pull alpine:3.19 --platform=linux/arm64 >/dev/null && grep -qx 'arch=aarch64' $MC_IMG_BASE/images/alpine-3.19/meta"
+  t "pull registry: tag khong ton tai bi tu choi" sh -c "! $MC pull alpine:khong-co-tag-nay >/dev/null 2>&1"
+else
+  skip "P2 registry (khong co mang)" 4
+fi
+t "pull --offline: cai tu OCI layout tren dia" sh -c "$MC save busybox-local-1 -o /tmp/mc-off.tgz >/dev/null && rm -rf /tmp/mc-off && mkdir /tmp/mc-off && tar -xf /tmp/mc-off.tgz -C /tmp/mc-off && $MC rmi busybox-local-1 >/dev/null && $MC pull --offline=/tmp/mc-off >/dev/null && $MC images | grep -q '^busybox-local-1'"
+rm -rf /tmp/mc-off /tmp/mc-off.tgz
+AB=/tmp/mcarch; rm -rf $AB; mkdir -p $AB; echo x > $AB/f.txt
+printf 'FROM busybox-local:1\nCOPY f.txt /f.txt\n' > $AB/Dockerfile
+t "build: arch thua ke tu base image" sh -c "$MC build -t arch-test:1 $AB >/dev/null && grep -qx 'arch=$(uname -m)' $MC_IMG_BASE/images/arch-test-1/meta"
+t "build --platform: ghi de arch dich" sh -c "$MC build -t arch-test2:1 --platform=linux/arm64 $AB >/dev/null && grep -qx 'arch=aarch64' $MC_IMG_BASE/images/arch-test2-1/meta"
+$MC rmi arch-test-1 >/dev/null 2>&1; $MC rmi arch-test2-1 >/dev/null 2>&1
+rm -rf $AB
 echo "=== P1.7: build tu Dockerfile ==="
 BC=/tmp/mcbuild; rm -rf $BC; mkdir -p $BC
 echo copied > $BC/data.txt

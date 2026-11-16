@@ -1,5 +1,29 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0e. PLAN_FINAL v2.0 — Phase P2 (distribution-spec) trên laptop — 2026-11-16
+
+`registry.c` (~440 dòng): token flow 401 → `WWW-Authenticate: Bearer realm=…` → đổi token →
+manifest list → chọn arch → tải blob vào `<base>/.pull/blobs/sha256/` → `img_install()`.
+Không nhúng TLS: gọi `/usr/bin/curl` (binary musl static không có libssl; box nào cũng có curl).
+
+Đo thực tế trên laptop x86_64 (mạng thật, Docker Hub):
+
+| Case | Kết quả |
+|---|---|
+| `pull alpine:3.19` | `/v2/` → 401; token 2.698 ký tự; manifest list → `amd64`; 2 blob (7 KB config + 3,3 MB layer); image 7,7 MB |
+| `pull alpine:3.19 --platform=linux/arm64` | chọn digest arm64, layer 3,2 MB → `arch=aarch64`, cảnh báo đúng "may nay la x86_64" |
+| `pull --offline=<oci-layout>` | `img_install()` thẳng trên thư mục, không tar lại, không mạng |
+| `build` từ base aarch64 trên x86_64 | meta ghi `arch=aarch64` (trước P2 ghi nhầm `x86_64`) |
+| `build --platform=linux/amd64` | meta ghi `arch=x86_64` |
+| `build --platform` khác arch + có `RUN` | exit 125 + "RUN can root" (chưa có binfmt/qemu) — có hint riêng khi exec lỗi |
+| `check` | thêm mục `curl` (không bắt buộc, chỉ cần cho pull registry) |
+
+- Resume: stage cố định `<base>/.pull` + `flock`, blob đã đủ sha256 thì bỏ qua, `curl -C -` tải
+  tiếp phần dở; thất bại thì giữ stage cho lần sau, thành công thì xoá.
+- Kích thước aarch64 musl: **249,5 KB** (P1: 237,5 KB → +12 KB).
+- `test.sh`: thêm 7 case P2 (4 registry có guard mạng + 1 offline + 2 arch). Chưa chạy lại toàn bộ
+  vì `sudo` cần mật khẩu tương tác trong phiên này.
+
 ## 0d. PLAN_FINAL v2.0 — Phase P1 hoàn tất (P1.5/P1.7/P1.8) trên laptop — 2026-11-16
 
 Đã xong nốt P1: P1.5 (`mounts[]` OCI + `--env`/`-w`/`--user`), P1.7 (`build` từ Dockerfile tập

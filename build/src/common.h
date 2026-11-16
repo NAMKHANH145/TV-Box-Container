@@ -203,6 +203,7 @@ int verify_signature(const char *pkg, const char *keypath);
 /* P1: OCI image store (load / images / rmi / run --image). */
 const char *img_base(void);
 int img_load(const char *file, const char *tag_override);
+int img_install(const char *stage, const char *tag_override);
 int do_build(int argc, char **argv);
 int do_export(const char *image, const char *out);
 int do_import(const char *bundle, const char *key);
@@ -213,6 +214,9 @@ int img_save(const char *name, const char *out);
 char **img_argv(const char *name, int *argc_out);
 int img_apply_env(const char *name);
 int layer_apply(const char *blob, const char *rootfs);
+
+/* P2: distribution-spec registry client (pull <image> from a registry). */
+int do_pull_registry(const char *ref, const char *platform);
 int do_exec(const char *id, char **cmd);
 int state_relationship_valid(const char *cgdir, int pid);
 

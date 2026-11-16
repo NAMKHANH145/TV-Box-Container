@@ -61,7 +61,7 @@ static void json_out(const struct item *it, int n) {
 }
 
 int do_check(int json) {
-    struct item it[10];
+    struct item it[12];
     int n = 0;
     struct utsname u;
     if (uname(&u) != 0) { snprintf(u.release, sizeof u.release, "unknown"); }
@@ -118,6 +118,11 @@ int do_check(int json) {
               access("/usr/bin/iptables", X_OK) == 0;
     it[n] = (struct item){ .name = "iptables", .ok = ipt, .required = 0 };
     snprintf(it[n++].detail, BUF_SIZE_MEDIUM, "%s", ipt ? "yes" : "no");
+
+    /* curl — chi can cho `pull <image>` tu registry (P2) */
+    int curl = access("/usr/bin/curl", X_OK) == 0 || access("/usr/local/bin/curl", X_OK) == 0;
+    it[n] = (struct item){ .name = "curl", .ok = curl, .required = 0 };
+    snprintf(it[n++].detail, BUF_SIZE_MEDIUM, "%s", curl ? "yes" : "no (can cho pull registry)");
 
     /* RAM >= 256 MB */
     long mem_kb = -1;
