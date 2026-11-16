@@ -25,13 +25,55 @@ jobs:
       - name: sdk init/pack (11 check, khong can root)
         run: bash build/smoke-sdk.sh
 
+      - name: install.sh smoke (fake local release)
+        run: |
+          mkdir -p /tmp/mc-rel /tmp/mc-stage
+          cp build/minicontainer /tmp/mc-rel/minicontainer-linux-x86_64
+          (cd /tmp/mc-rel && sha256sum minicontainer-linux-x86_64 > SHA256SUMS.txt)
+          MC_BASE_URL=file:///tmp/mc-rel DESTDIR=/tmp/mc-stage PREFIX=/usr/local \
+            sh install.sh --no-check
+          /tmp/mc-stage/usr/local/bin/minicontainer version --json | grep -q '"version":"2.0.0"'
+
+  # Full integration matrix on the two supported Ubuntu releases. GitHub-hosted
+  # runners already provide Docker, so run the same privileged container used
+  # during development (cgroup v2 controllers are delegated inside it).
+  local-test:
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        ubuntu: ["22.04", "24.04"]
+    steps:
+      - uses: actions/checkout@v4
+      - name: local-test on Ubuntu ${{ matrix.ubuntu }}
+        run: |
+          mkdir -p /tmp/mc-out
+          docker run --rm --privileged \
+            -v "$GITHUB_WORKSPACE":/repo -v /tmp/mc-out:/out \
+            ubuntu:${{ matrix.ubuntu }} bash -c '
+              set -e
+              export DEBIAN_FRONTEND=noninteractive
+              apt-get update -qq >/dev/null
+              apt-get install -y -qq busybox-static iproute2 iptables iputils-ping \
+                procps curl ca-certificates zstd gcc make libc6-dev >/dev/null
+              mkdir -p /sys/fs/cgroup/mc-host
+              for p in $(cat /sys/fs/cgroup/cgroup.procs); do
+                echo $p > /sys/fs/cgroup/mc-host/cgroup.procs 2>/dev/null || true
+              done
+              echo "+cpu +memory +pids +io" > /sys/fs/cgroup/cgroup.subtree_control
+              cd /repo/build
+              make clean >/dev/null
+              make CC=gcc STRIP=strip >/dev/null
+              bash local-test.sh 2>&1 | tee /out/test.log
+            '
+
   # Kiem tra tren phan cung that (TV Box S905W), khong the chay tren runner GitHub.
   hardware-test:
     runs-on: [self-hosted, linux, aarch64]
     if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     steps:
       - uses: actions/checkout@v4
-      - name: Chay test.sh tren TV Box (84 case)
+      - name: Chay test.sh tren TV Box (full matrix)
         run: bash build/test.sh
 
   build:
@@ -98,16 +140,21 @@ jobs:
     permissions:
       contents: write
     steps:
+      - uses: actions/checkout@v4
+
       - name: Download all binaries
         uses: actions/download-artifact@v4
         with:
           path: dist
           merge-multiple: true
 
+      - name: Add installer
+        run: cp install.sh dist/install.sh
+
       - name: Checksums
         run: |
           cd dist
-          sha256sum minicontainer-linux-* test.sh smoke-sdk.sh > SHA256SUMS.txt
+          sha256sum minicontainer-linux-* test.sh smoke-sdk.sh install.sh > SHA256SUMS.txt
           cat SHA256SUMS.txt
 
       - name: Create GitHub Release
@@ -117,4 +164,5 @@ jobs:
             dist/minicontainer-linux-*
             dist/test.sh
             dist/smoke-sdk.sh
+            dist/install.sh
             dist/SHA256SUMS.txt

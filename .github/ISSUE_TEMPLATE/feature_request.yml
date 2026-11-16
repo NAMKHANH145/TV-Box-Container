@@ -1,0 +1,38 @@
+name: Feature request
+description: Suggest a capability that fits the small-device scope
+title: "[feature] "
+labels: ["enhancement"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem
+      description: What are you trying to do on which device?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed behavior
+      description: Command lines, flags or file formats you expect
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and workarounds
+  - type: input
+    id: size
+    attributes:
+      label: Expected cost
+      description: Rough lines of C, new dependency, binary-size impact
+      placeholder: "~100 lines, no new dependency, +4 KB"
+  - type: checkboxes
+    id: scope
+    attributes:
+      label: Scope check
+      options:
+        - label: This does not require a background daemon or an HTTP management API
+          required: true
+        - label: This does not require cgroup v1 or a non-Linux host
+          required: true

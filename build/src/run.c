@@ -198,10 +198,23 @@ static int wait_child(pid_t child, int *status, long disk_limit, long long disk_
 int do_run(struct cfg *c) {
     /* P1: run straight from the image store; --rootfs still wins if both. */
     static char imgroot[PATH_MAX];
+    static char imgnorm[BUF_SIZE_MEDIUM];
     if (c->image && !c->rootfs) {
         if (img_rootfs(c->image, imgroot, sizeof imgroot) < 0) {
-            fprintf(stderr, "minicontainer: khong co image '%s' (dung: images)\n", c->image);
-            return EXIT_SETUP_ERROR;
+            /* The store flattens Docker refs (`nginx:alpine` -> `nginx-alpine`).
+             * Accept the original spelling as long as the flattened name exists. */
+            size_t o = 0;
+            int changed = 0;
+            for (const char *p = c->image; *p && o + 1 < sizeof imgnorm; p++) {
+                if (*p == ':' || *p == '/') { changed = 1; imgnorm[o++] = '-'; }
+                else imgnorm[o++] = *p;
+            }
+            imgnorm[o] = 0;
+            if (!changed || img_rootfs(imgnorm, imgroot, sizeof imgroot) < 0) {
+                fprintf(stderr, "minicontainer: khong co image '%s' (dung: images)\n", c->image);
+                return EXIT_SETUP_ERROR;
+            }
+            c->image = imgnorm;
         }
         c->rootfs = imgroot;
         if (!c->cmd || !c->cmd[0]) {
@@ -587,11 +600,14 @@ static void restart_keeper(const char *dir, const char *id) {
     for (;;) {
         char f[PATH_MAX + BUF_SIZE_SMALL], b[BUF_SIZE_SMALL];
         if (fmt_path(f, sizeof f, "%s/pid", dir) < 0) return;
-        if (read_small(f, b, sizeof b) < 0) { sleep(1); continue; }
+        /* State dir gone (`rm`): the container is being retired — exit instead
+         * of polling a missing file forever (orphan keeper, no way to stop it). */
+        if (read_small(f, b, sizeof b) < 0) return;
         pid_t pid = (pid_t)atoi(b);
         while (pid_alive(pid)) sleep(1);
+        if (access(dir, F_OK) != 0) return;   /* rm during the wait above */
         char *av[] = { exe, "start", (char *)id, NULL };
-        run_wait(av);
+        if (run_wait(av) != 0) return;         /* cannot restart (state gone/invalid) */
         sleep(1);
     }
 }

@@ -65,6 +65,15 @@ static void enable_ip_forward(void) {
     if (fd >= 0) { if (write(fd, "1", 1) != 1) { /* best effort */ } close(fd); }
 }
 
+/* Published ports are reached from the host itself through a 127.0.0.1 source
+ * that gets DNATed onto the bridge. The kernel refuses to send such a packet
+ * out a non-loopback device until route_localnet is on for that device; set it
+ * on our own bridge only, never in the global `all` knob. */
+static void enable_route_localnet(void) {
+    int fd = open("/proc/sys/net/ipv4/conf/" MC_BRIDGE "/route_localnet", O_WRONLY);
+    if (fd >= 0) { if (write(fd, "1", 1) != 1) { /* best effort */ } close(fd); }
+}
+
 /* Find interface with default route (read /proc/net/route, no `ip` needed). */
 static void default_iface(char *out, size_t n) {
     FILE *f = fopen("/proc/net/route", "r");
@@ -130,6 +139,7 @@ static void nat_setup(const char *container_ip, char **publish, int npublish) {
     ipt_add(fwd_in);
 
     /* Port mapping: -p hostport:containerport[/udp]. */
+    if (npublish > 0) enable_route_localnet();
     for (int i = 0; i < npublish; i++) {
         char hp[BUF_SIZE_SMALL], cp[BUF_SIZE_SMALL];
         const char *proto = "tcp";
@@ -143,6 +153,17 @@ static void nat_setup(const char *container_ip, char **publish, int npublish) {
                          "-p", (char *)proto, "--dport", hp,
                          "-j", "DNAT", "--to-destination", todest, NULL };
         ipt_add(dnat);
+        /* PREROUTING only sees forwarded traffic: a connection from the host
+         * itself (127.0.0.1:HOST or the host's own address) never reaches it.
+         * DNAT it in OUTPUT too and masquerade the 127/8 source on the way to
+         * the bridge, otherwise the container's replies are unroutable. */
+        char *odnat[] = { "iptables", "-t", "nat", "-A", "OUTPUT",
+                          "-p", (char *)proto, "--dport", hp,
+                          "-j", "DNAT", "--to-destination", todest, NULL };
+        ipt_add(odnat);
+        char *oloop[] = { "iptables", "-t", "nat", "-A", "POSTROUTING",
+                          "-o", MC_BRIDGE, "-s", "127.0.0.0/8", "-j", "MASQUERADE", NULL };
+        ipt_add(oloop);
         char *allow[] = { "iptables", "-A", "FORWARD", "-p", (char *)proto, "-d", (char *)container_ip,
                           "--dport", cp, "-j", "ACCEPT", NULL };
         ipt_add(allow);
@@ -173,6 +194,13 @@ static void nat_teardown(const char *container_ip, char **publish, int npublish)
                          "-p", (char *)proto, "--dport", hp,
                          "-j", "DNAT", "--to-destination", todest, NULL };
         run_ipt(dnat);
+        char *odnat[] = { "iptables", "-t", "nat", "-D", "OUTPUT",
+                          "-p", (char *)proto, "--dport", hp,
+                          "-j", "DNAT", "--to-destination", todest, NULL };
+        run_ipt(odnat);
+        char *oloop[] = { "iptables", "-t", "nat", "-D", "POSTROUTING",
+                          "-o", MC_BRIDGE, "-s", "127.0.0.0/8", "-j", "MASQUERADE", NULL };
+        run_ipt(oloop);
         char *allow[] = { "iptables", "-D", "FORWARD", "-p", (char *)proto, "-d", (char *)container_ip,
                           "--dport", cp, "-j", "ACCEPT", NULL };
         run_ipt(allow);

@@ -1,5 +1,82 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0h. PLAN_FINAL v2.0 — Phase P6 (adoption) trên laptop — 2026-11-17
+
+Phiên này **không có quyền root** trên laptop (user `namkhanh`, uid 1000, `/sys/fs/cgroup` là
+`dr-xr-xr-x` nên `cgroup.subtree_control` trả `Permission denied`). Vì vậy `build/local-test.sh`
+**không chạy lại được**, và **không có lượt `minicontainer run`/`compose` nào** trong phiên này.
+Mọi thứ dưới đây là thứ thật sự chạy được, không suy diễn.
+
+**Môi trường:** x86_64, Ubuntu 22.04 (kernel host `6.8.0-124-generic`), cgroup v2, docker 29.1.3
+(chỉ dùng để đối chiếu payload recipe và chạy binary trong container), mạng ra registry OK.
+
+### Build (0 warning ở cả hai arch)
+
+| Arch | Lệnh | Size | sha256 |
+|---|---|---|---|
+| x86_64 glibc | `make clean && make CC=gcc STRIP=strip` | 1.197.392 B | `01e83af4c2408dfcf18142e44813daeb9c8af5858bb4b0c0e4f9988c16ec4d64` |
+| aarch64 musl | `make clean && make` (toolchain Buildroot mặc định) | **280.112 B (273,5 KiB)** | `279930e773ede87a1837e8f3cf5047887aaa7eb3cc4a06d32d224986f5e93dc3` |
+
+`make tools` (bomb, breakout) cũng 0 warning. aarch64 280.112 B < ngưỡng 320 KB; ghi chú: sha256
+này **khác** bản P4 (`2bf93ab8…`) vì `run.c` đã thêm fallback tên image Docker (`nginx:alpine` →
+`nginx-alpine`).
+
+### Cái đã chạy thật
+
+| Hạng mục | Lệnh | Kết quả |
+|---|---|---|
+| `version --json` (P6.9) | `./minicontainer --version --json` | `{"version":"2.0.0","arch":"x86_64","libc":"glibc","static":true,"features":[…11…]}` |
+| `check --json` (P6.9) | `./minicontainer check --json` | JSON đủ 11 mục, `root.ok=false` (đúng vì không sudo), exit 1 — hành vi mong đợi |
+| smoke-sdk (không cần root) | `bash build/smoke-sdk.sh` | **PASS=11 FAIL=0 TONG=11** |
+| `install.sh` happy path (P6.1) | `sh install.sh --base-url=file:///tmp/mcrel --dest=/tmp/mcstage --no-check` | cài `/tmp/mcstage/usr/local/bin/minicontainer`, in `2.0.0` + sha256 khớp, exit 0 |
+| `install.sh` checksum sai | SHA256SUMS ghi toàn số 0 | `SHA256 mismatch` → exit 1, **không cài** |
+| `install.sh` thiếu asset | xoá `minicontainer-linux-x86_64` | `cannot download` → exit 1 |
+| `release.sh` (P6.6, không ký) | `bash build/release.sh` | tarball + `SHA256SUMS.txt` sinh OK; phát hiện + sửa lỗi arch (xem dưới) |
+| Guard arch của `release.sh` | `ARCH=x86_64 bash build/release.sh` khi binary là aarch64 | `release: LỖI — binary build ra aarch64 nhưng ARCH=x86_64` → từ chối đóng gói |
+| `pull` registry (P2, đường thật) | `pull alpine:3.19 / nginx:alpine / python:3.12-alpine / node:20-alpine / eclipse-mosquitto:2` | 5/5 thành công, đúng layer count (1/8/4/4/3), arch `x86_64` |
+| `build` từ Dockerfile (P1.7) | `build -t recipe-{nginx,python,node,mosquitto,gateway-api,gateway-web}:1 recipes/…` | 6/6 build xong, COPY + CMD đúng thứ tự |
+| `images` | `./minicontainer images` | 10 image trong store `/tmp/mcimg`, size hợp lý |
+
+### Recipe: payload đã verify, đường `minicontainer run` thì chưa
+
+Không root ⇒ không có lượt chạy nào qua `minicontainer`. Để không tuyên bố khống, tôi verify
+**payload** (conf + app + Dockerfile) bằng cách chạy đúng các file đó trên **cùng base image** mà
+`pull` đã tải về, dưới docker:
+
+| Recipe | Kiểm chứng | Kết quả |
+|---|---|---|
+| nginx | `nginx -t` + `wget 127.0.0.1:8080` | config syntax ok; trả `nginx recipe is running` |
+| python | `urllib` → `127.0.0.1:8000` | `python recipe ok` |
+| node | `http.get` → `127.0.0.1:3000` | `node recipe ok` |
+| mosquitto | `mosquitto_sub/pub` topic `demo` | `hello` |
+| gateway (2 service) | api + web trên cùng bridge, `wget web:8080/` | `gateway api ok` qua proxy tới `http://api:8000` |
+
+Lần chạy đầu của gateway **fail thật**: `nginx: [emerg] host not found in upstream "api"` vì
+container web khởi động trước khi có host `api`. Đây là điểm cần biết khi chạy `compose up` thật
+(thứ tự start + `/etc/hosts` do `bridge.c` ghi). Ghi lại làm rủi ro P6.4, không sửa core.
+
+**Vậy gate P6.4 "10/10 lượt chạy trên 2 distro" vẫn CHƯA đạt**: 5/5 payload đúng, 0/10 lượt chạy
+qua minicontainer (chờ root).
+
+### Lỗi thật đã sửa trong phiên
+
+`build/release.sh` đóng gói binary **aarch64** (toolchain mặc định của Makefile) nhưng đặt tên
+tarball theo `$(uname -m)` = `x86_64`. Hậu quả: asset `minicontainer-linux-x86_64` chứa binary ARM,
+`install.sh` verify sha256 xong vẫn cài và binary không chạy được trên máy x86_64. Đã sửa: đọc
+`e_machine` ở offset 18 của ELF, dùng arch thật; nếu `ARCH=` được truyền mà lệch thì **từ chối**
+đóng gói.
+
+### Chưa verify (và lý do)
+
+- `build/local-test.sh` (Bước 2): cần root + cgroup ghi được. Lệnh cần chạy:
+  `sudo MC=/home/namkhanh/TV-Box/build/minicontainer bash build/local-test.sh`.
+- 10/10 lượt recipe qua `minicontainer run`/`compose`: cùng lý do.
+- Toàn bộ mục hardware-only của v2.0: `/dev/watchdog` thật, reboot 5 lần sạch, p50 trên S905W,
+  6-image corpus, `nginx` + `redis` gọi nhau bằng tên trên box — **không có board**.
+- CI mới (`.github/workflows/build.yml`) chưa chạy lần nào trên GitHub.
+
+---
+
 ## 0g. PLAN_FINAL v2.0 — Phase P4 (update A/B, watchdog, metrics, compose-lite) trên laptop — 2026-11-16
 
 Đã xong P4.1–P4.6. Không có box, nên các phép đo dưới đây là x86_64; binary aarch64 chỉ
@@ -774,3 +851,96 @@ Binary v1.5.2 (`minicontainer 1.5.2 (aarch64, musl, static)`), box S905W.
 - Bridge NAT/DNS/port mapping: ✅ (outbound + DNAT + cleanup)
 - Seccomp strict mode: ✅ (84/84 dưới strict)
 - Self-hosted runner: ✅ online
+
+## v2.0.0 — P6 adoption: 5 recipe chạy thật trên laptop + TV Box (2026-11-17)
+
+Môi trường đo:
+
+- **Laptop**: x86_64, Ubuntu 22.04, kernel `6.8.0-124-generic`, chạy bằng root (qua `sudo -S`);
+  binary static glibc (bản dev, không phát hành).
+- **TV Box**: Amlogic S905W, aarch64, Ubuntu 26.04, kernel `6.18.38-meson64`, root,
+  1.8 GB RAM, `/dev/root` còn 7.1 GB.
+
+### Build — 0 warning trên cả 2 arch
+
+| Arch | Toolchain | Kích thước | sha256 | `--version` |
+|---|---|---|---|---|
+| x86_64 | `gcc` + glibc static | **1.197.584 B** | `b6a46b121ef317d46583cf696c95b2f36012a63e7199a8a225af821ec25c4051` | `minicontainer 2.0.0 (x86_64, glibc, static)` |
+| aarch64 | Buildroot musl (`aarch64-buildroot-linux-musl-gcc`) | **284.208 B** | `f400e3b7da9554cc805b6a6219824215d84b18c1fa1604fc49ec302d5dc9b84e` | `minicontainer 2.0.0 (aarch64, musl, static)` |
+
+- Ngưỡng đỏ CI (> 300 KB) chỉ áp cho asset musl; bản glibc static 1,2 MB là bản dev trên laptop.
+- aarch64 được `install -m755` vào `/usr/local/bin/minicontainer` trên box; sha256 trên box đọc lại
+  đúng `f400e3b7…dc9b84e` (khớp bản build).
+- `make` (aarch64) sinh lại `src/seccomp_strict_aarch64.c` (201 syscall) sau `make clean`.
+
+### Gate P6.4 — **10/10** (5 recipe × 2 thiết bị)
+
+Mỗi recipe: `pull` image gốc → `build` từ `recipes/<tên>/Dockerfile` → `run` với
+`--net=bridge -p` → kiểm payload so với `expected.txt`.
+
+| Recipe | Laptop x86_64 | Box aarch64 | Bằng chứng (payload) |
+|---|---|---|---|
+| nginx | PASS | PASS | `curl 127.0.0.1:8080/` → `nginx recipe is running` |
+| node | PASS | PASS | `curl 127.0.0.1:3000/` → `node recipe ok` |
+| python | PASS | PASS | `curl 127.0.0.1:8000/` → `python recipe ok` |
+| mosquitto | PASS | PASS | `mosquitto_sub -t demo` nhận `hello` từ `mosquitto_pub` trong cùng container |
+| gateway (2 service, compose bridge + publish) | PASS | PASS | `compose up` → 2 service RUNNING, `curl 127.0.0.1:8080/` → `gateway api ok` |
+
+- Laptop: `GATE_X86=5/5` (log `/tmp/final-*.log`).
+- Box: `GATE_BOX=5/5` (log `/root/final-*.log` trên box).
+- Trên laptop phải `pull --force` các image gốc: bản aarch64 đã pull trước đó (binary mặc định
+  `make` là aarch64) làm image bị tag `aarch64` và `run` từ chối đúng arch.
+
+### `test.sh` — 183 case, 2 thiết bị
+
+| Máy | Kết quả | Binary | Log |
+|---|---|---|---|
+| Laptop x86_64 | **PASS=176 FAIL=0 SKIP=7 TONG=183** | `b6a46b12…` | `/tmp/lt4.log` |
+| Box aarch64 | **PASS=182 FAIL=0 SKIP=1 TONG=183** | `f400e3b7…` | `/root/mc-test3.log` |
+
+- 7 SKIP trên laptop là loại host-specific (cgroup memory enforcement, wording `dmesg`, throughput
+  thiết bị, 3 case `pull` profile thiếu fixture).
+- 1 SKIP trên box là `P3.8 --emulate` (cross-arch qemu) — duy nhất.
+- Sau suite trên box: không còn process `minicontainer`, cgroup `minicontainer-*`, state rỗng.
+
+### Cross-arch: giao việc thật cho box
+
+- Trên box: `minicontainer compose -f recipes/gateway/compose.yml up` → `api` (python, 10.88.63.168)
+  + `web` (nginx, 10.88.63.193), cả hai `RUNNING`.
+- Từ laptop: `curl http://10.42.0.98:8080/` → `gateway api ok`, HTTP **200** (DNAT PREROUTING qua LAN).
+- `compose down` trên box: `web: stopped/removed`, `api: stopped/removed`, state sạch.
+
+### `release.sh` (P6.6)
+
+- `bash build/release.sh` (không đặt `ARCH`) → `minicontainer-2.0.0-linux-aarch64.tar.gz`,
+  sha256 `b2c040635803882d4784f6d7039e63f9853fa7ff1774a77b1fdb45d7f24921a1`; binary trong tarball
+  sha `f400e3b7…` — đúng bản đã deploy lên box.
+- `ARCH=x86_64 bash build/release.sh` khi `make` mặc định ra aarch64 → **từ chối đóng gói**:
+  `release: LỖI — binary build ra aarch64 nhưng ARCH=x86_64`.
+- Tarball, `.sha256` và `build/release/` đã xoá sau test (không commit binary).
+
+### 6 lỗi thật do gate P6.4 phát hiện (đều sửa ở nguyên nhân)
+
+1. `src/compose.c`: `ports`/`env`/`mounts` là mảng 2 chiều nhưng bị cast thành `char **` →
+   `pub_parse` đọc con trỏ rác → **SIGSEGV** ở `compose up` với service có `ports`
+   (ASAN: `pub_parse src/bridge.c:101` ← `nat_setup`). Sửa: dựng vector con trỏ thật mỗi service.
+2. `src/build.c`: `COPY site/ /usr/share/nginx/html/` chép thành `html/site/` (Docker chép *nội dung*
+   thư mục). Sửa: source là thư mục → `cp -a <src>/.` giữ nguyên ngữ nghĩa Docker.
+3. `src/bridge.c`: `-p` chỉ DNAT ở `PREROUTING` nên **không truy cập được từ chính host**
+   (`curl 127.0.0.1:8080` timeout, `iptables -t nat -L OUTPUT` trống). Sửa: thêm DNAT ở `OUTPUT`,
+   `MASQUERADE -s 127.0.0.0/8 -o mcbr0`, và bật `route_localnet` **chỉ trên `mcbr0`**
+   (đo được: `route_localnet=0` → `curl=000`; `=1` trên mcbr0 → `curl=200`).
+4. `recipes/nginx/nginx.conf` + `recipes/gateway/web/nginx.conf`: worker `initgroups()` bị
+   `setgroups=deny` từ chối (`Operation not permitted`) → thêm `user root;` + `master_process off;`
+   (đơn tiến trình, log ghi `/tmp`).
+5. `recipes/mosquitto/mosquitto.conf`: `Error setting groups whilst dropping privileges` →
+   thêm `user root`.
+6. `recipes/python/app.py`: `HTTPServer.server_bind()` gọi `getfqdn()`, khi image thiếu
+   `/etc/resolv.conf` thì chặn **5,03 s** trước khi listen (đo `socket.getfqdn("0.0.0.0")` = 5.03 s)
+   → override `server_bind()` để mở cổng ngay.
+
+### Chưa verify (vẫn hardware-only)
+
+- Reset thật qua `/dev/watchdog`, 5 lần reboot sạch, p50 latency, corpus 6 image, soak 24 h.
+- 3 asset musl còn lại (armv7l, riscv64, x86_64-musl) chưa chạy trên phần cứng tương ứng.
+- CI GitHub (`build.yml` 4 arch + smoke-sdk) chưa chạy lại sau các sửa trên.

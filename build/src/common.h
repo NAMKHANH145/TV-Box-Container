@@ -24,7 +24,7 @@
 #include <linux/seccomp.h>
 
 #define STACK_SIZE (1024 * 1024)
-#define MC_VERSION "1.5.4"
+#define MC_VERSION "2.0.0"
 
 /* Compile-time target arch/libc — used by `--version`, `check`, `sdk pack` and
  * the rootfs arch guard in run.c. Keep in sync with generate_seccomp.py. */

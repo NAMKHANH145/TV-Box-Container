@@ -1,0 +1,13 @@
+services:
+  api:
+    image: recipe-gateway-api:1
+    command: ["python", "/app.py"]
+    network: bridge
+    memory: 64M
+  web:
+    image: recipe-gateway-web:1
+    command: ["nginx", "-g", "daemon off;"]
+    network: bridge
+    memory: 64M
+    ports: ["8080:8080"]
+    restart: no

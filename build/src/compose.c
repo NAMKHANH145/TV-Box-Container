@@ -318,9 +318,16 @@ static int compose_up(const char *file) {
         if (s->image[0]) c.image = s->image;
         if (s->rootfs[0]) c.rootfs = s->rootfs;
         if (s->argc > 0) c.cmd = s->argv;
-        if (s->nports > 0) { c.publish = (char **)s->ports; c.npublish = s->nports; }
-        if (s->nenv > 0) { c.env = (char **)s->env; c.nenv = s->nenv; }
-        if (s->nmounts > 0) { c.mounts = (char **)s->mounts; c.nmounts = s->nmounts; }
+        /* ports/env/mounts are 2-D char arrays; casting one to char ** hands
+         * do_run pointers built from the first bytes of the strings. Materialise
+         * a real pointer vector per service. */
+        char *pubv[CS_LIST], *envv[CS_ENV], *mntv[CS_LIST];
+        for (int k = 0; k < s->nports; k++) pubv[k] = s->ports[k];
+        for (int k = 0; k < s->nenv; k++) envv[k] = s->env[k];
+        for (int k = 0; k < s->nmounts; k++) mntv[k] = s->mounts[k];
+        if (s->nports > 0) { c.publish = pubv; c.npublish = s->nports; }
+        if (s->nenv > 0) { c.env = envv; c.nenv = s->nenv; }
+        if (s->nmounts > 0) { c.mounts = mntv; c.nmounts = s->nmounts; }
         if (s->memory[0]) {
             long b = parse_bytes(s->memory);
             if (b <= 0) {

@@ -1,0 +1,66 @@
+name: Bug report
+description: Something in minicontainer does not behave as documented
+title: "[bug] "
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not paste secrets, IP addresses or passwords. Use `<IP_BOX>` placeholders.
+        Security issues: use SECURITY.md, not a public issue.
+  - type: input
+    id: version
+    attributes:
+      label: Version and architecture
+      description: Output of `minicontainer version --json`
+      placeholder: '{"version":"2.0.0","arch":"aarch64",...}'
+    validations:
+      required: true
+  - type: textarea
+    id: check
+    attributes:
+      label: Environment check
+      description: Paste the full output of `sudo minicontainer check --json`
+      render: json
+    validations:
+      required: true
+  - type: input
+    id: kernel
+    attributes:
+      label: Kernel and distro
+      placeholder: "6.18.38-meson64 / Ubuntu 26.04"
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      description: Exact commands, rootfs/image name, and flags
+      placeholder: |
+        1. minicontainer pull alpine:3.19
+        2. minicontainer run --image=alpine-3.19 ...
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+    validations:
+      required: true
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior and logs
+      description: Include `minicontainer logs <id>` and stderr; redact secrets
+      render: text
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before submitting
+      options:
+        - label: I removed passwords, IP addresses and private keys from the output
+          required: true
+        - label: I searched existing issues
+          required: true

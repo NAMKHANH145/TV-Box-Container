@@ -16,6 +16,12 @@ echo "=== prerequisite ==="
 for f in "$MC" "$BR/bin/busybox" "$ALP/bin/busybox" "$BR/bomb" "$BR/breakout"; do
   [ -e "$f" ] || { echo "THIEU: $f"; exit 1; }
 done
+# Fixture chu ky phai co san: thieu no thi test chu ky that bai, va cac test phu dinh
+# (goi bi sua / thieu .sig) se PASS oan. Dung im lang, bao ro roi thoat.
+FXCHK=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/tests/fixtures
+for f in "$FXCHK/test.pub" "$FXCHK/signed-rootfs.tar.gz" "$FXCHK/signed-rootfs.tar.gz.sig"; do
+  [ -e "$f" ] || { echo "THIEU: $f (phai copy ca tests/fixtures theo test.sh)"; exit 1; }
+done
 echo ok
 cleanup() {
   for m in $(mount | grep -oE "${BR}[0-9]*"); do umount -l "$m" 2>/dev/null; done
@@ -417,7 +423,8 @@ t "save -> rmi -> load round-trip" sh -c "$MC save whiteout-test-1 -o $IW/rt.tar
 $MC rmi whiteout-test-1 >/dev/null 2>&1
 rm -rf $IW
 II=/tmp/mcimg2; rm -rf $II; mkdir -p $II/arch/blobs/sha256
-tar -czf $II/l.tar.gz -C $BR .
+# Bo ./dev/*: rootfs that co device node (runtime mknod vao $BR/dev), con image that thi khong.
+tar -czf $II/l.tar.gz -C $BR --exclude=./dev/* .
 HL=$(sha256sum $II/l.tar.gz | cut -d' ' -f1)
 cp $II/l.tar.gz $II/arch/blobs/sha256/$HL
 printf '{"architecture":"%s","os":"linux","config":{"Cmd":["/bin/sh"],"Env":["PATH=/bin:/sbin"]}}' "$OARCH" > $II/arch/config.json
@@ -535,7 +542,7 @@ printf 'v2\n' > $UP/p2/rootfs/etc/mc-update-version
 printf 'v3-bad\n' > $UP/p3/rootfs/etc/mc-update-version
 for n in 1 2 3; do
   printf '{"arch":"%s","version":"%s"}\n' "$(uname -m)" "$n" > $UP/p$n/manifest.json
-  tar -czf $UP/p$n.tgz -C $UP/p$n .
+  tar -czf $UP/p$n.tgz -C $UP/p$n --exclude=./rootfs/dev/* .
 done
 UB=$UP/base
 t "P4.1 update: slot A + link" sh -c "$MC update apply $UP/p1.tgz --base=$UB --link=$UP/rootfs >/dev/null && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v1 ] && [ \"\$(readlink $UB/current)\" = slots/A ]"

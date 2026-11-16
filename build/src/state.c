@@ -533,6 +533,24 @@ static int parse_publish_array(const char *pubbuf, char **pubs, int max_pubs) {
     return np;
 }
 
+/* --restart keeper (run.c restart_keeper) is a setsid() session leader, so its
+ * whole process group goes with it. Killing only restart_pid leaves an already
+ * forked `start <id>` child alive, which revives the container behind stop's
+ * back (container + cgroup leak, invisible in `ps`). */
+static void kill_restart_keeper(int rp) {
+    if (rp <= 1) return;
+    char p[64];
+    if (getpgid(rp) == rp) kill(-rp, SIGTERM);
+    kill(rp, SIGTERM);
+    for (int i = 0; i < 20; i++) {
+        snprintf(p, sizeof p, "/proc/%d/stat", rp);
+        if (access(p, F_OK) != 0) return;
+        usleep(100000);
+    }
+    if (getpgid(rp) == rp) kill(-rp, SIGKILL);
+    kill(rp, SIGKILL);
+}
+
 /* stop <id>: TERM ca cgroup, cho timeout, KILL neu con sot, don cgroup/watchdog */
 int do_stop(const char *id, int timeout) {
     if (!valid_name(id)) { fprintf(stderr, "invalid container id\n"); return 1; }
@@ -558,7 +576,7 @@ int do_stop(const char *id, int timeout) {
     /* Kill the --restart keeper BEFORE the container, otherwise it can see
      * the pid disappear and start the container right back up. */
     snprintf(f, sizeof f, "%s/restart_pid", dir);
-    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) { int rp = atoi(rb); if (rp > 1) kill(rp, SIGTERM); } }
+    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) kill_restart_keeper(atoi(rb)); }
     unlink(f);
 
     if (!state_rootfs_valid(rootfs) || !state_relationship_valid(cg, pid)) {
@@ -650,7 +668,7 @@ int do_rm(const char *id, int force) {
     snprintf(f, sizeof f, "%s/watchdog", dir);
     int wd = (read_small(f, wdbuf, sizeof wdbuf) == 0) ? atoi(wdbuf) : 0;
     snprintf(f, sizeof f, "%s/restart_pid", dir);
-    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) { int rp = atoi(rb); if (rp > 1) kill(rp, SIGTERM); } }
+    { char rb[BUF_SIZE_SMALL]; if (read_small(f, rb, sizeof rb) == 0) kill_restart_keeper(atoi(rb)); }
     unlink(f);
 
     if (!state_rootfs_valid(rootfs) || !state_relationship_valid(cg, pid)) {

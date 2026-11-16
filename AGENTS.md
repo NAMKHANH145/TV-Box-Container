@@ -2,8 +2,12 @@
 
 > Đọc file này trước khi làm bất cứ gì. Đây là dự án container runtime zero-daemon bằng C cho
 > TV Box Amlogic S905W (aarch64, 1.8 GB RAM, Ubuntu 26.04, kernel `6.18.38-meson64`).
-> Trạng thái: **v1.5.4** (tag `v1.5.4` đã phát hành) · `test.sh` **84 case** (84/84 PASS trên phần
-> cứng thật, 2026-11-12) · nhánh `main` đã push.
+> Trạng thái: **v2.0.0** (P0–P4 + P6 đã commit trên `main`, **chưa tag**) · `test.sh` **183 case**:
+> box S905W **182 PASS / 0 FAIL / 1 SKIP**, laptop x86_64 **176 PASS / 0 FAIL / 7 SKIP** (đo
+> 2026-11-17) · gate P6.4 **10/10** (5 recipe × 2 máy; box aarch64 chạy gateway compose thật, laptop
+> `curl` sang được) · binary aarch64 musl **284.208 B** · v1.5.4 (2026-11-12) là mốc đã phát hành ·
+> phần **hardware-only** của v2.0 (watchdog thật, 5 reboot, p50, soak 24 h, corpus 6 image) **chưa
+> verify** — box đã có, dùng `BOX=<IP_BOX>`.
 
 ## 1. Thứ tự đọc (khoảng 25 phút)
 
@@ -26,7 +30,8 @@ build/src/*.c        24 module (main, cli, common, ns, namespace_setup, run, exe
                      log, preflight, update, img, layer, json, build, ship) — ~6.000 dòng
                      (+ 5 file seccomp_strict_*.c sinh tự động, 638 dòng mỗi file)
 build/Makefile       make / make tools / make deploy BOX=… SSHPASS_FILE=… / make clean
-build/test.sh        84 case, phải xanh trước mọi PR (cần box + root)
+build/test.sh        183 case, phải xanh trước mọi PR (cần box + root)
+build/local-test.sh  chạy test.sh trên host Linux thường (cần root + /bin/busybox)
 build/smoke-sdk.sh   11 check sdk init/pack, không cần root/box — chạy cả trên CI
 build/soak.sh        ITER=… (24 h ≈ ITER=117000), kiểm rò cgroup/mount/state
 build/bench.sh       độ trễ + so sánh Docker
@@ -91,13 +96,25 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 - `sdk pack` kiểm tra symlink **lexically** (không `realpath`): target tuyệt đối luôn hợp lệ, target
   tương đối chỉ bị từ chối khi đi lên quá gốc rootfs. Đừng đổi sang "chặn mọi `..`" — sẽ chặn cả
   `usr/bin/x -> ../../bin/y` của Buildroot/Alpine.
+- `-p HOST:CONTAINER` cần **3 thứ**, thiếu một là host tự `curl 127.0.0.1:HOST` timeout:
+  DNAT ở `PREROUTING` (client ngoài), DNAT ở `OUTPUT` (client là chính host), và
+  `net.ipv4.conf.mcbr0.route_localnet=1` (chỉ trên `mcbr0`, không đụng `all`) + MASQUERADE cho
+  source `127/8` sang bridge. Đo được: `route_localnet=0` → `curl=000`, bật trên mcbr0 → `200`.
+- User namespace 1-uid: `setgroups` bị `deny` nên mọi `initgroups()`/`setgid()` để "drop privileges"
+  đều `EPERM`. Image đa tiến trình phải chạy trên mapped root (nginx: `user root;` +
+  `master_process off;`; mosquitto: `user root`). Chown sang uid khác cũng `EINVAL`.
+- Image thiếu `/etc/resolv.conf` làm `socket.getfqdn()` của Python chặn ~5 s trước khi `listen`
+  (`HTTPServer.server_bind`), dễ bị đọc nhầm là "container không chạy".
 
 ## 6. Việc tiếp theo (theo thứ tự)
 
 1. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
-2. `bash test.sh` trên box (kỳ vọng `TONG=84`), rồi Ctrl-C 20 lần liền để kiểm đường dọn dẹp mới.
+2. `bash test.sh` trên box đã chạy 2026-11-17: **182 PASS / 0 FAIL / 1 SKIP / 183** (SKIP là
+   `P3.8 --emulate`). Còn lại: Ctrl-C 20 lần liền để kiểm đường dọn dẹp.
    **Không chạy test.sh đồng thời với soak.sh** (assertion cleanup là toàn cục, sẽ FAIL oan).
-3. Tag `v1.5.4` đã xong 2026-11-12 (84/84, soak 6000). Lần release sau: `bash build/release.sh` rồi tag.
+3. v2.0.0 đã xong P0–P4 + P6, suite xanh trên cả 2 máy, nhưng **chưa tag**: còn phần hardware-only
+   (`/dev/watchdog` thật, reboot 5 lần, p50, 6-image corpus), rồi `bash build/release.sh` + tag.
+   Bản `v1.5.4` tag 2026-11-12 (84/84, soak 6000) là mốc cuối đã phát hành.
    Lưu ý: `v1.5.3` có CI build đỏ (trùng `install_filter_strict`) — dùng `v1.5.4` trở đi.
 4. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local); asset mới có kèm
    `smoke-sdk.sh` nên mỗi arch tự kiểm được `sdk` mà không cần root.

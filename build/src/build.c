@@ -226,7 +226,17 @@ static int do_copy(struct bstate *b, const char *context, const char *args, int 
             fprintf(stderr, "minicontainer: build: remote ADD not supported, use COPY\n");
             return -1;
         }
-        if (copy_path(src, dstfull) != 0) {
+        /* Docker copies the *contents* of a source directory, never the
+         * directory itself: `COPY site/ /usr/share/nginx/html/` must land
+         * index.html in html/, not html/site/. `cp -a dir/.` gives exactly
+         * that; plain `cp -a dir` would nest one extra level. */
+        char eff[PATH_MAX];
+        struct stat sst;
+        if (stat(src, &sst) == 0 && S_ISDIR(sst.st_mode))
+            fmt_path(eff, sizeof eff, "%s/.", src);
+        else
+            fmt_path(eff, sizeof eff, "%s", src);
+        if (copy_path(eff, dstfull) != 0) {
             fprintf(stderr, "minicontainer: build: cannot copy %s\n", parts[i]);
             return -1;
         }

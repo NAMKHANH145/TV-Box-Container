@@ -259,8 +259,11 @@ static int sdk_pack(int argc, char **argv) {
     }
 
     printf("sdk: packing %s -> %s\n", root, out);
+    /* Bo qua noi dung ./dev: runtime tu tao /dev khi container start, va pull/load
+     * tu choi device node (layer.c) — dong goi chung se ra goi khong cai duoc. */
     char *const tav[] = { "tar", "-czf", (char *)out, "-C", root,
-                          "--numeric-owner", "--owner=0", "--group=0", ".", NULL };
+                          "--numeric-owner", "--owner=0", "--group=0",
+                          "--exclude=./dev/*", ".", NULL };
     int rc = run_wait(tav);
     if (rc != 0) {
         fprintf(stderr, "minicontainer: sdk pack: tar failed (exit %d)\n", rc);

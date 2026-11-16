@@ -96,10 +96,12 @@ int do_check(int json) {
     it[n] = (struct item){ .name = "userns", .ok = ns, .required = 1 };
     snprintf(it[n++].detail, BUF_SIZE_MEDIUM, "%s", ns ? "enabled" : "disabled");
 
-    /* overlayfs — can cho image store */
+    /* overlayfs — khong bat buoc: image store giu rootfs da merge (khong overlay).
+     * Nhieu kernel (vd. meson64 tren S905W) co overlay duoi dang module chua load,
+     * nen thieu overlay la canh bao, khong phai ly do chan chay. */
     int ovl = file_has("/proc/filesystems", "overlay");
-    it[n] = (struct item){ .name = "overlayfs", .ok = ovl, .required = 1 };
-    snprintf(it[n++].detail, BUF_SIZE_MEDIUM, "%s", ovl ? "yes" : "khong co (fallback copy)");
+    it[n] = (struct item){ .name = "overlayfs", .ok = ovl, .required = 0 };
+    snprintf(it[n++].detail, BUF_SIZE_MEDIUM, "%s", ovl ? "yes" : "khong co (khong dung)");
 
     /* xattr tren thu muc du lieu */
     const char *xdir = access("/var/lib", W_OK) == 0 ? "/var/lib" : "/tmp";

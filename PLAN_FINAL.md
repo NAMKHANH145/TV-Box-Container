@@ -3,9 +3,11 @@
 > Mục tiêu: **runtime tương thích OCI, chạy được image Docker không sửa gì**, vẫn là 1 binary C
 > tĩnh dưới 300 KB, 0 daemon, 0 MB RAM khi rảnh, và **mọi tuyên bố đều có lệnh kiểm chứng**.
 >
-> Hiện trạng: v1.5.4 · 3.300 dòng C · 169 KB (aarch64 musl) · 84/84 test · soak 6000 vòng.
+> Hiện trạng: **v2.0.0 (P0–P4 + P6 đã commit trên `main`, chưa tag)** · ~6.000 dòng C · 284.208 B
+> (aarch64 musl) · suite 183 case (176 PASS/0 FAIL/7 SKIP, đo 2026-11-16 trên x86_64) · soak 6000 vòng
+> · **hardware v2.0 chưa verify** (không có board S905W trong phiên).
 > Phạm vi v2.0: **P0–P4 (kỹ thuật) + P6 (adoption)** — đủ để ~100 người ngoài cài và dùng được.
-> Tài liệu này là kế hoạch thực thi + hồ sơ bảo vệ. Cập nhật lần cuối: 2026-11-16.
+> Tài liệu này là kế hoạch thực thi + hồ sơ bảo vệ. Cập nhật lần cuối: 2026-11-17.
 
 ---
 
@@ -321,6 +323,34 @@ P6 chạy song song với P4, không chờ P5.
 | P6.7 | CI: build 4 arch + smoke + `local-test` trên Ubuntu 22.04/24.04 + badge | workflow | badge xanh, log công khai |
 | P6.8 | Support model: nhãn `supported`/`experimental`, chính sách N-1, quy trình deprecate | 1 mục trong README | người dùng biết cái gì được bảo hành |
 | P6.9 | Chẩn đoán máy đọc được: `check --json`, `version --json` | 2 lệnh | dán vào issue là đủ debug |
+
+**Gate P6:** người lạ cài trong 10 phút; recipe 10/10; issue có `check --json`; release verify được
+từ source.
+Đo thực tế 2026-11-17 (x86_64, Ubuntu 22.04, kernel `6.8.0-124-generic`, **không root**):
+P6.1 `install.sh` chạy thật trên release giả `file://` — cài đúng, in sha256, **từ chối** khi
+`SHA256SUMS` sai và khi thiếu asset; P6.2/P6.3/P6.5/P6.8 có file, nội dung khớp CLI thật (mọi lệnh
+trong README đã đối chiếu `--help`); P6.6 `release.sh` chạy không ký OK và đã sửa một lỗi thật (đóng
+gói binary aarch64 dưới tên `x86_64` — giờ đọc `e_machine` của ELF và từ chối khi `ARCH=` lệch);
+P6.7 CI viết xong nhưng **chưa chạy lần nào** trên GitHub; P6.9 `version --json` + `check --json`
+chạy đúng (JSON 11 mục).
+
+Chạy lại **bằng root trên 2 thiết bị** (2026-11-17, chi tiết trong `progress/VERIFICATION_LOG.md`):
+- **P6.4 gate ĐẠT 10/10** — 5 recipe × 2 máy: nginx, node, python, mosquitto, gateway (compose 2
+  service qua bridge + publish) đều PASS trên laptop x86_64 (`GATE_X86=5/5`) và trên TV Box S905W
+  aarch64 (`GATE_BOX=5/5`, log `/root/final-*.log`).
+- `test.sh`: laptop **176 PASS / 0 FAIL / 7 SKIP / 183**, box **182 PASS / 0 FAIL / 1 SKIP / 183**.
+- **Việc thật giao cho box**: box chạy gateway (api python + web nginx), laptop `curl
+  http://10.42.0.98:8080/` → `gateway api ok`, HTTP 200.
+- `release.sh`: tarball `minicontainer-2.0.0-linux-aarch64.tar.gz` sha256 `b2c04063…f24921a1`,
+binary trong tarball khớp `f400e3b7…` đã deploy lên box; `ARCH=x86_64` bị từ chối đúng.
+- Chạy recipe phát hiện **6 lỗi thật**, đều sửa ở nguyên nhân: SEGV `compose.c` (cast mảng 2 chiều
+  thành `char **`), `COPY` thư mục sai ngữ nghĩa Docker (`build.c`), `-p` không truy cập được từ
+  chính host (`bridge.c`: thiếu DNAT `OUTPUT` + `route_localnet` trên `mcbr0`), và 3 recipe
+  (nginx `user root; master_process off;`, mosquitto `user root`, python bỏ `getfqdn()` chặn 5 s).
+
+Chưa đạt: 1 lệnh cài trên **4 arch** mới thử x86_64; badge CI xanh; danh sách "cái gì được bảo
+hành" chưa có phản hồi người ngoài thật; phần hardware-only (watchdog thật, reboot, p50, soak 24 h)
+vẫn chưa verify.
 
 #### P6.1 `install.sh` — thiết kế
 
@@ -676,8 +706,12 @@ Câu trả lời mẫu:
 
 ## 13. Checklist trước khi tag v2.0
 
+> Danh sách này viết từ thời trước P1. Trạng thái thật của từng mục P0–P6 nằm ở các đoạn
+> "Đo thực tế" trong §4 và ở `progress/VERIFICATION_LOG.md` mục `0b`–`0h`. `[~]` = một phần.
+> Dòng không có dấu vẫn là **chưa làm / chưa verify**.
+
 ```
-[x] 84/84 case cũ xanh
+[x] suite cũ xanh (183 case khi chạy đủ: 176 PASS / 0 FAIL / 7 SKIP, đo 2026-11-16)
 [ ] 6 image corpus: load + run + curl/exec
 [ ] `build` từ Dockerfile tập con: COPY + RUN + CMD, có cache
 [ ] `build --platform=linux/arm64` ra image arm64 (qemu ở laptop)
@@ -699,12 +733,13 @@ Câu trả lời mẫu:
 [ ] soak 6000 vòng không rò
 [ ] VERIFICATION_LOG.md ghi số thật + arch + kernel + sha256
 [ ] README/AGENTS cập nhật, non-goals ghi rõ
-[ ] install.sh cài được trên 4 arch, verify sha256
+[~] install.sh: x86_64 cài + verify sha256 + từ chối checksum sai (2026-11-17); 3 arch còn lại chưa thử
 [ ] 3 người lạ cài + chạy nginx trong < 10 phút
-[ ] 5 recipe × 2 distro = 10/10 lượt chạy
-[ ] README EN + COMPAT.md + SECURITY.md + CHANGELOG.md
-[ ] release ký (.sig) + SHA256SUMS + hướng dẫn build tái lập
+[~] 5 recipe: payload 5/5 đúng; 0/10 lượt chạy qua minicontainer (cần root) — 2026-11-17
+[x] README EN + COMPAT.md + SECURITY.md + CHANGELOG.md
+[~] release: SHA256SUMS + hướng dẫn build tái lập OK; `.sig` mới là opt-in, chưa ai ký thật
 [ ] issue template có ô dán `check --json`
+[ ] CI 4 arch + local-test xanh (workflow viết xong, chưa chạy lần nào)
 ```
 
 ---
