@@ -20,6 +20,10 @@ static const struct option run_options[] = {
 	{"net", required_argument, NULL, 'N'},
 	{"hostname", required_argument, NULL, 'H'},
 	{"publish", required_argument, NULL, 'p'},
+	{"env", required_argument, NULL, 'e'},
+	{"workdir", required_argument, NULL, 'w'},
+	{"user", required_argument, NULL, 'u'},
+	{"mount", required_argument, NULL, 'M'},
 	{"help", no_argument, NULL, 1},
 	{NULL, 0, NULL, 0}
 };
@@ -48,7 +52,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 	/* Reset getopt */
 	optind = 1;
 
-	while ((opt = getopt_long(argc, argv, "+r:c:i:k:n:dDRs:h:o:I:N:H:P:p:", run_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+r:c:i:k:n:dDRs:h:o:I:N:H:P:p:e:w:u:M:", run_options, &option_index)) != -1) {
 		switch (opt) {
 			case 'r': cf->ram = need_bytes("--ram", optarg); break;
 			case 'c': cf->cpu = (int)need_bytes("--cpu", optarg); break;
@@ -70,6 +74,18 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 			case 'I': cf->image = optarg; break;
 			case 'N': cf->net = optarg; break;
 			case 'H': cf->hostname = optarg; break;
+			case 'e':
+				cf->env = realloc(cf->env, (cf->nenv + 2) * sizeof *cf->env);
+				cf->env[cf->nenv++] = (char *)optarg;
+				cf->env[cf->nenv] = NULL;
+				break;
+			case 'w': cf->workdir = optarg; break;
+			case 'u': cf->user = optarg; break;
+			case 'M':
+				cf->mounts = realloc(cf->mounts, (cf->nmounts + 2) * sizeof *cf->mounts);
+				cf->mounts[cf->nmounts++] = (char *)optarg;
+				cf->mounts[cf->nmounts] = NULL;
+				break;
 			case 'p':
 			case 'P':
 				cf->publish = realloc(cf->publish, (cf->npublish + 2) * sizeof *cf->publish);
@@ -98,6 +114,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 void print_usage(const char *prog) {
 	fprintf(stderr, "Usage: %s run [--ram=30M] [--cpu=20] [--pids=64] [--io=1M] [--disk=100M] [--detach|-d] [--name=ID]\n"
 		"                  [--net=host|isolated|bridge] [--rootfs=DIR | --image=NAME] [--hostname=NAME] [--health-cmd CMD]\n"
+		"                  [--env K=V]... [-w DIR] [--user UID[:GID]] [--mount type:src:dst[:opts]]...\n"
 		"                  [--read-only] [--seccomp=default|strict|off] [--publish HOST:CONTAINER | -p HOST:CONTAINER]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
 		"       %s logs [-f] [--tail=N] <id> | gc [--dry-run] |\n"
@@ -106,5 +123,7 @@ void print_usage(const char *prog) {
 		"       %s sdk init <dir> [--profile=P] [--ram=32M] | sdk pack <dir> [-o OUT] [--force] |\n"
 		"       %s check [--json] |\n"
 		"       %s load <file.tar> [--tag=NAME] | images [--json] | rmi <name> | save <name> -o <file.tar> |\n"
-		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog);
+		"       %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache] CONTEXT |\n"
+		"       %s export <image> -o <bundle.tar.gz> | import <bundle> [--verify=PUBKEY] |\n"
+		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog, prog, prog);
 }

@@ -21,8 +21,10 @@
 ## 2. Cây làm việc
 
 ```
-build/src/*.c        15 module (main, cli, common, ns, run, exec, bridge, cgroup,
-                     disk, seccomp, oci, state, systemd, pull, sdk) — ~2.412 dòng
+build/src/*.c        24 module (main, cli, common, ns, namespace_setup, run, exec,
+                     bridge, cgroup_v2, disk, seccomp, oci, state, systemd, pull, sdk,
+                     log, preflight, update, img, layer, json, build, ship) — ~6.000 dòng
+                     (+ 5 file seccomp_strict_*.c sinh tự động, 638 dòng mỗi file)
 build/Makefile       make / make tools / make deploy BOX=… SSHPASS_FILE=… / make clean
 build/test.sh        84 case, phải xanh trước mọi PR (cần box + root)
 build/smoke-sdk.sh   11 check sdk init/pack, không cần root/box — chạy cả trên CI
@@ -80,7 +82,8 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
   → phải fail loudly.
 - Port < 1024 không bind được trong container (mapped root không có `CAP_NET_BIND_SERVICE`).
 - CI dùng image Docker Hub `muslcc/x86_64:<target>` (musl.cc chặn IP runner GitHub); image không có
-  `make` → gọi `gcc -static -O2 -Wall` trực tiếp; gate fail nếu binary > 200 KB.
+  `make` → gọi `gcc -static -O2 -Wall` trực tiếp; gate fail nếu binary > 300 KB
+  (mốc này chỉ để bắt nhầm glibc static 620 KB+; musl hiện ~237 KB).
 - Asset release tải về **mất bit `+x`** → phải `chmod +x`.
 - Signal handler của `run.c` chỉ được làm 2 việc async-signal-safe: ghi `sig_atomic_t` và `kill(child)`.
   Không `fopen`/`rmdir`/`usleep`/`cgroup_cleanup` trong handler (deadlock nếu signal đến giữa

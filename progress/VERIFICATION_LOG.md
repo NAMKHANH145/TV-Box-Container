@@ -1,5 +1,29 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0d. PLAN_FINAL v2.0 — Phase P1 hoàn tất (P1.5/P1.7/P1.8) trên laptop — 2026-11-16
+
+Đã xong nốt P1: P1.5 (`mounts[]` OCI + `--env`/`-w`/`--user`), P1.7 (`build` từ Dockerfile tập
+con + cache), P1.8 (`export`/`import` bundle 1 file + chữ ký). Toàn bộ 15→18 module, `make` sạch
+warning ở cả `-O2` và `-Os`.
+
+**Chưa chạy lại `test.sh` toàn bộ** trong phiên này: `sudo` trên laptop đòi mật khẩu tương tác.
+Phần P1.8 đã được kiểm bằng tay (không cần root) với image tự dựng:
+
+| Case | Kết quả |
+|---|---|
+| `export demo-1 -o b.tgz` | bundle + `b.tgz.sha256` (85 B, `sha256sum -c` OK), trong bundle có `manifest.json` + `image.tar` |
+| `rmi demo-1` → `import b.tgz` | `images` liệt kê lại `demo-1` (`x86_64`, 2,1 MB), `rootfs/` khôi phục đủ |
+| sửa `image.tar` rồi import | `sha256 mismatch` → exit 1 |
+| `import --verify=test.pub` khi thiếu `.sig` | `missing or malformed` → exit 1 |
+| `import --verify=test.pub` với `.sig` của gói khác | `Signature Verification Failure` → exit 1 |
+
+Kích thước aarch64 musl sau P1 đầy đủ: **237,5 KB** (`-O2`) / **221,5 KB** (`-Os`), so với
+217,5 KB sau P1.1–P1.6. Gate CI "binary < 200 KB" (mục đích là bắt nhầm glibc static 620 KB+)
+được nâng lên 300 KB; ghi chú trong `AGENTS.md` §5 cập nhật theo.
+
+`test.sh`: thêm 7 case P1.8 → **TONG=131** khi chạy trên box/root (124 trước đó). Cần chạy lại
+`sudo bash build/local-test.sh` để xác nhận 131/131.
+
 ## 0c. PLAN_FINAL v2.0 — Phase P1 (phần lõi) trên laptop — 2026-11-16
 
 Đã xong: P1.1 (jsmn + parse index/manifest/config + verify digest), P1.2 (áp layer:

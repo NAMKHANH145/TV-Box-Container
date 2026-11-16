@@ -19,6 +19,8 @@ void namespace_chroot(const char *rootfs);
 
 /* Mount /proc inside the chroot. */
 void namespace_mount_proc(void);
+void namespace_apply_mounts(struct cfg *c);
+void namespace_setup_identity(struct cfg *c);
 
 /* Remount rootfs read-only after /proc is mounted (inside chroot).
  * Returns 0 on success, -1 on error (with error message printed). */

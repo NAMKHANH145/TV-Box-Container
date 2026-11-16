@@ -37,13 +37,13 @@ typedef struct jsmn_parser {
     int toksuper;
 } jsmn_parser;
 
-static void jsmn_init(jsmn_parser *parser) {
+static inline void jsmn_init(jsmn_parser *parser) {
     parser->pos = 0;
     parser->toknext = 0;
     parser->toksuper = -1;
 }
 
-static jsmntok_t *jsmn_alloc_token(jsmn_parser *parser, jsmntok_t *tokens, size_t num_tokens) {
+static inline jsmntok_t *jsmn_alloc_token(jsmn_parser *parser, jsmntok_t *tokens, size_t num_tokens) {
     if (parser->toknext >= num_tokens) return NULL;
     jsmntok_t *tok = &tokens[parser->toknext++];
     tok->start = tok->end = -1;
@@ -54,14 +54,14 @@ static jsmntok_t *jsmn_alloc_token(jsmn_parser *parser, jsmntok_t *tokens, size_
     return tok;
 }
 
-static void jsmn_fill_token(jsmntok_t *token, jsmntype_t type, int start, int end) {
+static inline void jsmn_fill_token(jsmntok_t *token, jsmntype_t type, int start, int end) {
     token->type = type;
     token->start = start;
     token->end = end;
     token->size = 0;
 }
 
-static int jsmn_parse_primitive(jsmn_parser *parser, const char *js, size_t len,
+static inline int jsmn_parse_primitive(jsmn_parser *parser, const char *js, size_t len,
                                 jsmntok_t *tokens, size_t num_tokens) {
     int start = (int)parser->pos;
     for (; parser->pos < len && js[parser->pos] != '\0'; parser->pos++) {
@@ -93,7 +93,7 @@ found:
     return 0;
 }
 
-static int jsmn_parse_string(jsmn_parser *parser, const char *js, size_t len,
+static inline int jsmn_parse_string(jsmn_parser *parser, const char *js, size_t len,
                              jsmntok_t *tokens, size_t num_tokens) {
     int start = (int)parser->pos;
     parser->pos++;
@@ -137,7 +137,7 @@ static int jsmn_parse_string(jsmn_parser *parser, const char *js, size_t len,
     return JSMN_ERROR_PART;
 }
 
-static int jsmn_parse(jsmn_parser *parser, const char *js, size_t len,
+static inline int jsmn_parse(jsmn_parser *parser, const char *js, size_t len,
                       jsmntok_t *tokens, unsigned int num_tokens) {
     int r;
     int i;

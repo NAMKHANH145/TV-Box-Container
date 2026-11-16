@@ -418,8 +418,36 @@ printf '[{"Config":"blobs/sha256/%s","RepoTags":["busybox-local:1"],"Layers":["b
 tar -cf $II/img.tar -C $II/arch .
 t "run --image: chay tu image store" sh -c "$MC load $II/img.tar >/dev/null && $MC run --image=busybox-local-1 /bin/sh -c 'echo img-ok' | grep -q img-ok"
 t "run --image: image Env duoc ap dung" sh -c "$MC run --image=busybox-local-1 /bin/sh -c 'echo \$PATH' | grep -q '/bin:/sbin'"
+echo "=== P1.8: export/import bundle ==="
+XB=/tmp/mcxb; rm -rf $XB; mkdir -p $XB/m
+t "export: tao bundle + .sha256" sh -c "$MC export busybox-local-1 -o $XB/b.tgz >/dev/null && [ -s $XB/b.tgz ] && [ -s $XB/b.tgz.sha256 ]"
+t "export: manifest co name/arch/sha256" sh -c "tar -xzf $XB/b.tgz -C $XB/m ./manifest.json && grep -q '\"name\": \"busybox-local-1\"' $XB/m/manifest.json && grep -q '\"sha256\": \"[0-9a-f]\\{64\\}\"' $XB/m/manifest.json"
+t "export: .sha256 khop bundle" sh -c "cd $XB && sha256sum -c b.tgz.sha256 >/dev/null"
+t "import: round-trip sau rmi" sh -c "$MC rmi busybox-local-1 >/dev/null && $MC import $XB/b.tgz >/dev/null && $MC run --image=busybox-local-1 /bin/sh -c 'echo back' | grep -qx back"
+t "import: bundle bi sua bi tu choi" sh -c "mkdir -p $XB/t && tar -xzf $XB/b.tgz -C $XB/t && echo junk >> $XB/t/image.tar && tar -czf $XB/bad.tgz -C $XB/t . && ! $MC import $XB/bad.tgz >/dev/null 2>&1"
+t "import --verify: thieu .sig bi tu choi" sh -c "! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
+t "import --verify: sig sai bi tu choi" sh -c "cp $FX/signed-rootfs.tar.gz.sig $XB/b.tgz.sig && ! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
+rm -rf $XB
+echo "=== P1.7: build tu Dockerfile ==="
+BC=/tmp/mcbuild; rm -rf $BC; mkdir -p $BC
+echo copied > $BC/data.txt
+printf 'FROM busybox-local:1\nWORKDIR /app\nCOPY data.txt /app/\nRUN echo run-ok > /app/ran.txt\nCMD ["/bin/sh","-c","cat /app/data.txt /app/ran.txt"]\n' > $BC/Dockerfile
+t "build: tao image tu Dockerfile" sh -c "$MC build -t btest:1 $BC >/dev/null && $MC images | grep -q btest-1"
+t "build: COPY + RUN co trong image" sh -c "$MC run --image=btest-1 | grep -q run-ok"
+t "build: cache hit khi rebuild" sh -c "$MC build -t btest:1 $BC 2>&1 | grep -q '\\[cache\\]'"
+t "build: --no-cache chay lai RUN" sh -c "! $MC build -t btest:1 --no-cache $BC 2>&1 | grep -q '\\[cache\\]'"
+$MC rmi btest-1 >/dev/null 2>&1
+rm -rf $BC
 $MC rmi busybox-local-1 >/dev/null 2>&1
 rm -rf $II
+echo "=== P1.5: env/workdir/mount + OCI bundle ==="
+t "run --env ap dung bien moi truong" sh -c "$MC run --rootfs $BR --env MC_T=abc /bin/sh -c 'echo \$MC_T' | grep -qx abc"
+t "run -w doi cwd" sh -c "$MC run --rootfs $BR -w /tmp /bin/sh -c 'pwd' | grep -qx /tmp"
+t "run --mount tmpfs ghi duoc" sh -c "$MC run --rootfs $BR --mount tmpfs::/tmp/mnt:size=2M /bin/sh -c 'echo z >/tmp/mnt/f && cat /tmp/mnt/f' | grep -qx z"
+OB=/tmp/mcbundle; rm -rf $OB; mkdir -p $OB; cp -a $BR $OB/rootfs
+printf '{"ociVersion":"1.0.2","process":{"args":["/bin/sh","-c","echo C=$(pwd); echo E=$OCIV; echo w >/tmp/mnt/x && cat /tmp/mnt/x"],"env":["OCIV=bundle"],"cwd":"/tmp"},"root":{"path":"rootfs"},"mounts":[{"destination":"/tmp/mnt","type":"tmpfs","source":"tmpfs","options":["size=2M"]}]}' > $OB/config.json
+t "oci-run: env + cwd + mounts[]" sh -c "$MC oci-run $OB | grep -qx C=/tmp && $MC oci-run $OB | grep -qx E=bundle"
+rm -rf $OB
 rm -rf $SD
 echo "=== leak ==="
 t "mount leak = 0" sh -c "! mount | grep -Fq '$BR/' && ! mount | grep -Fq '$ALP/'"

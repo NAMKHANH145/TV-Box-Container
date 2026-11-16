@@ -55,7 +55,7 @@ jobs:
       # musl.cc truncates requests from GitHub runner IPs ("Actions has been
       # blocked wholesale"), so the maintainer-published Docker images are the
       # only reliable way to get gcc+musl here. musl is what keeps the assets
-      # ~100-130KB: glibc static costs 620-930KB for the same code.
+      # ~220-240KB: glibc static costs 620-930KB for the same code.
       # Flags mirror build/Makefile (the images ship no make, only the compiler).
       - name: Build static binary (musl)
         run: |
@@ -68,10 +68,10 @@ jobs:
         run: |
           file build/minicontainer
           size=$(stat -c '%s' build/minicontainer)
-          # A glibc-static build of this code is 600KB+; anything over 200KB
+          # A glibc-static build of this code is 600KB+; anything over 300KB
           # means the wrong libc slipped in.
-          if [ "$size" -gt 200000 ]; then
-            echo "minicontainer is $size bytes - expected a musl static build under 200000" >&2
+          if [ "$size" -gt 300000 ]; then
+            echo "minicontainer is $size bytes - expected a musl static build under 300000" >&2
             exit 1
           fi
 

@@ -18,7 +18,7 @@
 #define IMG_JSON_MAX     (16 * 1024 * 1024)
 #define IMG_MAX_TOKENS   65536
 
-static const char *img_base(void) {
+const char *img_base(void) {
     const char *e = getenv("MC_IMG_BASE");
     return (e && *e) ? e : IMG_BASE_DEFAULT;
 }
@@ -62,76 +62,21 @@ static char *read_all(const char *path, size_t *len) {
     return buf;
 }
 
-static int tok_eq(const char *js, jsmntok_t *t, const char *s) {
-    size_t n = strlen(s);
-    return t->type == JSMN_STRING && (size_t)(t->end - t->start) == n &&
-           memcmp(js + t->start, s, n) == 0;
-}
-
-static void tok_copy(const char *js, jsmntok_t *t, char *out, size_t n) {
-    size_t len = (size_t)(t->end - t->start);
-    if (len >= n) len = n - 1;
-    memcpy(out, js + t->start, len);
-    out[len] = '\0';
-}
-
-static int tok_skip(jsmntok_t *t, int i) {
-    int end = i + 1;
-    if (t[i].type == JSMN_OBJECT) {
-        for (int k = 0; k < t[i].size; k++) { end = tok_skip(t, end); end = tok_skip(t, end); }
-    } else if (t[i].type == JSMN_ARRAY) {
-        for (int k = 0; k < t[i].size; k++) end = tok_skip(t, end);
-    }
-    return end;
-}
-
-/* Value token of `key` inside object token `obj`, or -1. */
-static int obj_get(const char *js, jsmntok_t *t, int obj, const char *key) {
-    if (obj < 0 || t[obj].type != JSMN_OBJECT) return -1;
-    int i = obj + 1;
-    for (int k = 0; k < t[obj].size; k++) {
-        if (tok_eq(js, &t[i], key)) return i + 1;
-        i = tok_skip(t, i + 1);
-    }
-    return -1;
-}
-
-static int arr_nth(jsmntok_t *t, int arr, int n) {
-    if (arr < 0 || t[arr].type != JSMN_ARRAY || n >= t[arr].size) return -1;
-    int i = arr + 1;
-    for (int k = 0; k < n; k++) i = tok_skip(t, i);
-    return i;
-}
-
-static int parse_json(const char *path, char **js, jsmntok_t **toks, int *ntok) {
-    size_t len = 0;
-    *js = read_all(path, &len);
-    if (!*js) return -1;
-    *toks = malloc(sizeof(jsmntok_t) * IMG_MAX_TOKENS);
-    if (!*toks) { free(*js); return -1; }
-    jsmn_parser p;
-    jsmn_init(&p);
-    int r = jsmn_parse(&p, *js, len, *toks, IMG_MAX_TOKENS);
-    if (r < 1) { free(*js); free(*toks); return -1; }
-    *ntok = r;
-    return 0;
-}
-
 /* Write the image's argv/env side files from its config.json. */
 static void write_config_side(const char *js, jsmntok_t *t, int ntok, const char *dir) {
     (void)ntok;
     char path[PATH_MAX], buf[BUF_SIZE_HUGE];
     size_t o = 0;
     /* OCI config: {architecture, os, config:{Env,Cmd,Entrypoint,...}} */
-    int cfg = obj_get(js, t, 0, "config");
+    int cfg = json_obj_get(js, t, 0, "config");
     if (cfg < 0) cfg = 0;
-    int ep = obj_get(js, t, cfg, "Entrypoint");
-    int cmd = obj_get(js, t, cfg, "Cmd");
+    int ep = json_obj_get(js, t, cfg, "Entrypoint");
+    int cmd = json_obj_get(js, t, cfg, "Cmd");
     for (int pass = 0; pass < 2; pass++) {
         int arr = pass == 0 ? ep : cmd;
         if (arr < 0) continue;
         for (int k = 0; k < t[arr].size; k++) {
-            int e = arr_nth(t, arr, k);
+            int e = json_arr_nth(t, arr, k);
             if (e < 0) break;
             size_t len = (size_t)(t[e].end - t[e].start);
             if (o + len + 1 >= sizeof buf) break;
@@ -150,10 +95,10 @@ static void write_config_side(const char *js, jsmntok_t *t, int ntok, const char
     if (fd >= 0) { ssize_t w = write(fd, buf, o); (void)w; close(fd); }
 
     o = 0;
-    int env = obj_get(js, t, cfg, "Env");
+    int env = json_obj_get(js, t, cfg, "Env");
     if (env >= 0) {
         for (int k = 0; k < t[env].size; k++) {
-            int e = arr_nth(t, env, k);
+            int e = json_arr_nth(t, env, k);
             if (e < 0) break;
             size_t len = (size_t)(t[e].end - t[e].start);
             if (o + len + 1 >= sizeof buf) break;
@@ -216,7 +161,7 @@ int img_load(const char *file, const char *tag_override) {
     if (access(mpath, R_OK) == 0) {
         /* docker save: [{"Config":"blobs/...","RepoTags":[...],"Layers":[...]}] */
         char *js; jsmntok_t *t; int nt;
-        if (parse_json(mpath, &js, &t, &nt) < 0) {
+        if (json_parse_file(mpath, &js, &t, &nt) < 0) {
             fprintf(stderr, "minicontainer: load: bad manifest.json\n");
             goto out;
         }
@@ -224,79 +169,79 @@ int img_load(const char *file, const char *tag_override) {
         if (entries == 0) { fprintf(stderr, "minicontainer: load: empty manifest.json\n"); free(js); free(t); goto out; }
         if (tag_override) {
             for (int i = 0; i < entries; i++) {
-                int e = arr_nth(t, 0, i);
-                int tags = obj_get(js, t, e, "RepoTags");
+                int e = json_arr_nth(t, 0, i);
+                int tags = json_obj_get(js, t, e, "RepoTags");
                 if (tags < 0) continue;
                 for (int k = 0; k < t[tags].size; k++) {
-                    int g = arr_nth(t, tags, k);
-                    if (g >= 0 && tok_eq(js, &t[g], tag_override)) { pick = i; goto picked; }
+                    int g = json_arr_nth(t, tags, k);
+                    if (g >= 0 && json_tok_eq(js, &t[g], tag_override)) { pick = i; goto picked; }
                 }
             }
             fprintf(stderr, "minicontainer: load: tag '%s' not in archive\n", tag_override);
             free(js); free(t); goto out;
         }
 picked: {
-            int e = arr_nth(t, 0, pick);
-            int c = obj_get(js, t, e, "Config");
+            int e = json_arr_nth(t, 0, pick);
+            int c = json_obj_get(js, t, e, "Config");
             if (c < 0) { fprintf(stderr, "minicontainer: load: no Config\n"); free(js); free(t); goto out; }
-            tok_copy(js, &t[c], cfg_rel, sizeof cfg_rel);
-            int tags = obj_get(js, t, e, "RepoTags");
+            json_tok_copy(js, &t[c], cfg_rel, sizeof cfg_rel);
+            int tags = json_obj_get(js, t, e, "RepoTags");
             if (tag_override) fmt_path(ref, sizeof ref, "%s", tag_override);
             else if (tags >= 0 && t[tags].size > 0) {
-                int g = arr_nth(t, tags, 0);
-                if (g >= 0) tok_copy(js, &t[g], ref, sizeof ref);
+                int g = json_arr_nth(t, tags, 0);
+                if (g >= 0) json_tok_copy(js, &t[g], ref, sizeof ref);
             }
-            int ls = obj_get(js, t, e, "Layers");
+            int ls = json_obj_get(js, t, e, "Layers");
             if (ls < 0) { fprintf(stderr, "minicontainer: load: no Layers\n"); free(js); free(t); goto out; }
             for (int k = 0; k < t[ls].size && nlayers < 64; k++) {
-                int g = arr_nth(t, ls, k);
-                if (g >= 0) tok_copy(js, &t[g], layers[nlayers++], sizeof layers[0]);
+                int g = json_arr_nth(t, ls, k);
+                if (g >= 0) json_tok_copy(js, &t[g], layers[nlayers++], sizeof layers[0]);
             }
         }
         free(js); free(t);
     } else if (access(ipath, R_OK) == 0) {
         /* OCI layout: index.json -> image index -> manifest -> config/layers */
         char *js; jsmntok_t *t; int nt;
-        if (parse_json(ipath, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad index.json\n"); goto out; }
-        int ms = obj_get(js, t, 0, "manifests");
-        int m0 = arr_nth(t, ms, 0);
-        int dg = obj_get(js, t, m0, "digest");
+        if (json_parse_file(ipath, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad index.json\n"); goto out; }
+        int ms = json_obj_get(js, t, 0, "manifests");
+        int m0 = json_arr_nth(t, ms, 0);
+        int dg = json_obj_get(js, t, m0, "digest");
         char d1[BUF_SIZE_SMALL] = "", rel1[PATH_MAX];
-        if (dg >= 0) tok_copy(js, &t[dg], d1, sizeof d1);
+        if (dg >= 0) json_tok_copy(js, &t[dg], d1, sizeof d1);
         if (t[0].type == JSMN_OBJECT && dg >= 0) {
-            int ann = obj_get(js, t, m0, "annotations");
-            int rn = ann >= 0 ? obj_get(js, t, ann, "org.opencontainers.image.ref.name") : -1;
-            if (rn >= 0) tok_copy(js, &t[rn], ref, sizeof ref);
+            int ann = json_obj_get(js, t, m0, "annotations");
+            int rn = ann >= 0 ? json_obj_get(js, t, ann, "org.opencontainers.image.ref.name") : -1;
+            if (rn >= 0) json_tok_copy(js, &t[rn], ref, sizeof ref);
         }
         free(js); free(t);
         if (!d1[0] || blob_rel(stage, d1, rel1, sizeof rel1) < 0) { fprintf(stderr, "minicontainer: load: image index missing\n"); goto out; }
 
         char p1[PATH_MAX];
         fmt_path(p1, sizeof p1, "%s/%s", stage, rel1);
-        if (parse_json(p1, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad image index\n"); goto out; }
-        int im = arr_nth(t, obj_get(js, t, 0, "manifests"), 0);
-        int md = obj_get(js, t, im, "digest");
+        if (json_parse_file(p1, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad image index\n"); goto out; }
+        int im = json_arr_nth(t, json_obj_get(js, t, 0, "manifests"), 0);
+        int md = json_obj_get(js, t, im, "digest");
         char d2[BUF_SIZE_SMALL] = "";
-        if (md >= 0) tok_copy(js, &t[md], d2, sizeof d2);
+        if (md >= 0) json_tok_copy(js, &t[md], d2, sizeof d2);
         free(js); free(t);
         char rel2[PATH_MAX];
         if (!d2[0] || blob_rel(stage, d2, rel2, sizeof rel2) < 0) { fprintf(stderr, "minicontainer: load: manifest missing\n"); goto out; }
 
         char p2[PATH_MAX];
         fmt_path(p2, sizeof p2, "%s/%s", stage, rel2);
-        if (parse_json(p2, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad manifest\n"); goto out; }
-        int cf = obj_get(js, t, 0, "config");
-        int cd = cf >= 0 ? obj_get(js, t, cf, "digest") : -1;
+        if (json_parse_file(p2, &js, &t, &nt) < 0) { fprintf(stderr, "minicontainer: load: bad manifest\n"); goto out; }
+        int cf = json_obj_get(js, t, 0, "config");
+        int cd = cf >= 0 ? json_obj_get(js, t, cf, "digest") : -1;
         char dcfg[BUF_SIZE_SMALL] = "";
-        if (cd >= 0) tok_copy(js, &t[cd], dcfg, sizeof dcfg);
-        int ls = obj_get(js, t, 0, "layers");
+        if (cd >= 0) json_tok_copy(js, &t[cd], dcfg, sizeof dcfg);
+        int ls = json_obj_get(js, t, 0, "layers");
         if (ls >= 0) {
             for (int k = 0; k < t[ls].size && nlayers < 64; k++) {
-                int e = arr_nth(t, ls, k);
-                int ld = e >= 0 ? obj_get(js, t, e, "digest") : -1;
+                int e = json_arr_nth(t, ls, k);
+                int ld = e >= 0 ? json_obj_get(js, t, e, "digest") : -1;
                 if (ld < 0) continue;
                 char d[BUF_SIZE_SMALL];
-                tok_copy(js, &t[ld], d, sizeof d);
+                json_tok_copy(js, &t[ld], d, sizeof d);
                 if (blob_rel(stage, d, layers[nlayers], sizeof layers[0]) == 0) nlayers++;
             }
         }
@@ -393,12 +338,12 @@ picked: {
 
     /* config: arch + default argv/env */
     char *js; jsmntok_t *t; int nt;
-    if (parse_json(dst, &js, &t, &nt) == 0) {
+    if (json_parse_file(dst, &js, &t, &nt) == 0) {
         char arch[BUF_SIZE_SMALL] = "";
-        int a = obj_get(js, t, 0, "architecture");
+        int a = json_obj_get(js, t, 0, "architecture");
         if (a >= 0) {
             char raw[BUF_SIZE_SMALL];
-            tok_copy(js, &t[a], raw, sizeof raw);
+            json_tok_copy(js, &t[a], raw, sizeof raw);
             arch_norm(raw, arch, sizeof arch);
         }
         write_config_side(js, t, nt, dir);

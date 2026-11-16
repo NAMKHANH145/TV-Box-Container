@@ -47,6 +47,27 @@ int main(int argc, char **argv) {
             else { fprintf(stderr, "Usage: %s ps [--json]\n", argv[0]); return 1; }
         return do_ps(json);
     }
+    if (argc >= 4 && strcmp(argv[1], "export") == 0) {
+        const char *out = NULL;
+        for (int i = 3; i < argc; i++) {
+            if (strncmp(argv[i], "-o", 2) == 0) {
+                if (argv[i][2]) out = argv[i] + 2;
+                else if (i + 1 < argc) out = argv[++i];
+            } else if (strncmp(argv[i], "--output=", 9) == 0) out = argv[i] + 9;
+        }
+        if (!out) { fprintf(stderr, "Usage: %s export <image> -o <bundle.tar.gz>\n", argv[0]); return 1; }
+        return do_export(argv[2], out);
+    }
+    if (argc >= 3 && strcmp(argv[1], "import") == 0) {
+        const char *key = NULL;
+        for (int i = 3; i < argc; i++) {
+            if (strncmp(argv[i], "--verify=", 9) == 0) key = argv[i] + 9;
+            else if (strcmp(argv[i], "--verify") == 0 && i + 1 < argc) key = argv[++i];
+        }
+        return do_import(argv[2], key);
+    }
+    if (argc >= 2 && strcmp(argv[1], "build") == 0)
+        return do_build(argc, argv);
     if (argc >= 2 && strcmp(argv[1], "images") == 0) {
         int json = 0;
         for (int i = 2; i < argc; i++) {

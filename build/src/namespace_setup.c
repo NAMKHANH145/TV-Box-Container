@@ -180,6 +180,100 @@ void namespace_mount_proc(void) {
     }
 }
 
+/* P1.5: OCI mounts[] / --mount type:source:dest[:options].
+ * Runs after chroot, so `dest` is a path inside the container. /proc, /dev and
+ * /sys are already provided by the setup (mounting a tmpfs over /dev would
+ * hide the device nodes we just created), so those destinations are skipped. */
+static int mount_spec_one(const char *spec) {
+    char buf[PATH_MAX * 3];
+    snprintf(buf, sizeof buf, "%s", spec);
+    char *type = buf;
+    char *src = strchr(type, ':');
+    if (!src) { fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n"); return -1; }
+    *src++ = 0;
+    char *dst = strchr(src, ':');
+    if (!dst) { fprintf(stderr, "minicontainer: --mount wants type:src:dst[:opts]\n"); return -1; }
+    *dst++ = 0;
+    char *opts = strchr(dst, ':');
+    if (opts) *opts++ = 0;
+
+    if (dst[0] != '/') { fprintf(stderr, "minicontainer: mount dest must be absolute\n"); return -1; }
+    if (strcmp(dst, "/proc") == 0 || strcmp(dst, "/dev") == 0 || strcmp(dst, "/sys") == 0)
+        return 0;
+
+    unsigned long flags = 0;
+    char data[BUF_SIZE_MEDIUM] = "";
+    size_t dl = 0;
+    if (opts) {
+        char ob[BUF_SIZE_MEDIUM];
+        snprintf(ob, sizeof ob, "%s", opts);
+        for (char *o = strtok(ob, ","); o; o = strtok(NULL, ",")) {
+            if (strcmp(o, "ro") == 0) flags |= MS_RDONLY;
+            else if (strcmp(o, "nosuid") == 0) flags |= MS_NOSUID;
+            else if (strcmp(o, "nodev") == 0) flags |= MS_NODEV;
+            else if (strcmp(o, "noexec") == 0) flags |= MS_NOEXEC;
+            else if (strcmp(o, "rbind") == 0) flags |= MS_BIND | MS_REC;
+            else if (strcmp(o, "bind") == 0) flags |= MS_BIND;
+            else if (strcmp(o, "sync") == 0) flags |= MS_SYNCHRONOUS;
+            else {
+                int w = snprintf(data + dl, sizeof data - dl, "%s%s", dl ? "," : "", o);
+                if (w > 0) dl += (size_t)w;
+            }
+        }
+    }
+    char dircopy[PATH_MAX * 2];
+    snprintf(dircopy, sizeof dircopy, "%s", dst);
+    if (mkdir_p(dircopy) < 0) {
+        fprintf(stderr, "minicontainer: cannot create mount point %s: %s\n", dst, strerror(errno));
+        return -1;
+    }
+
+    if (strcmp(type, "bind") == 0) {
+        if (mount(src, dst, NULL, MS_BIND | (flags & MS_REC), NULL) < 0) {
+            fprintf(stderr, "minicontainer: mount --bind %s -> %s: %s\n", src, dst, strerror(errno));
+            return -1;
+        }
+        if (flags & MS_RDONLY) mount(NULL, dst, NULL, MS_REMOUNT | MS_BIND | MS_RDONLY, NULL);
+        return 0;
+    }
+    const char *fstype = type;
+    const char *source = src[0] ? src : type;
+    if (mount(source, dst, fstype, flags, data[0] ? data : NULL) < 0) {
+        fprintf(stderr, "minicontainer: mount -t %s %s: %s\n", fstype, dst, strerror(errno));
+        return -1;
+    }
+    return 0;
+}
+
+void namespace_apply_mounts(struct cfg *c) {
+    for (int i = 0; i < c->nmounts; i++) {
+        if (mount_spec_one(c->mounts[i]) < 0) die("mount from config");
+    }
+}
+
+void namespace_setup_identity(struct cfg *c) {
+    if (c->workdir && c->workdir[0]) {
+        if (chdir(c->workdir) < 0) {
+            fprintf(stderr, "minicontainer: cannot chdir to '%s': %s\n", c->workdir, strerror(errno));
+            die("workdir");
+        }
+    }
+    if (c->user && c->user[0]) {
+        char buf[BUF_SIZE_SMALL];
+        snprintf(buf, sizeof buf, "%s", c->user);
+        char *colon = strchr(buf, ':');
+        long uid = atol(buf);
+        long gid = colon ? atol(colon + 1) : uid;
+        if (colon) *colon = 0;
+        /* Only ids present in the userns map can be assumed. */
+        if (setgid((gid_t)gid) < 0 || setuid((uid_t)uid) < 0) {
+            fprintf(stderr, "minicontainer: cannot switch to %ld:%ld inside userns: %s\n",
+                    uid, gid, strerror(errno));
+            die("--user");
+        }
+    }
+}
+
 void namespace_setup_dns(const char *net) {
     if (strcmp(net, "host") == 0 || strcmp(net, "isolated") == 0) return;
 
@@ -289,9 +383,12 @@ void namespace_child_setup(struct cfg *c, int detach) {
     namespace_chroot(c->rootfs);
     namespace_setup_dns(c->net);
     namespace_mount_proc();
+    namespace_apply_mounts(c);
 
     if (c->read_only && namespace_remount_ro(c->rootfs) < 0)
         die("remount rootfs read-only");
+
+    namespace_setup_identity(c);
 
     /* Detach: redirect stdio to /dev/null BEFORE exec */
     if (detach) {

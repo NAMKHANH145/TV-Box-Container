@@ -322,11 +322,14 @@ static int sdk_pack(int argc, char **argv) {
     struct tm tmv;
     gmtime_r(&now, &tmv);
     strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
-    char mb[PATH_MAX * 2 + BUF_SIZE_LARGE];
-    snprintf(mb, sizeof mb,
-             "{\n  \"name\": \"%s\",\n  \"arch\": \"%s\",\n  \"file\": \"%s\",\n"
-             "  \"sha256\": \"%s\",\n  \"size\": %lld,\n  \"created\": \"%s\"\n}\n",
-             prof, rarch, ob, hash, sz, ts);
+    char mb[PATH_MAX * 3 + BUF_SIZE_LARGE * 2];
+    if (fmt_path(mb, sizeof mb,
+                 "{\n  \"name\": \"%s\",\n  \"arch\": \"%s\",\n  \"file\": \"%s\",\n"
+                 "  \"sha256\": \"%s\",\n  \"size\": %lld,\n  \"created\": \"%s\"\n}\n",
+                 prof, rarch, ob, hash, sz, ts) < 0) {
+        fprintf(stderr, "minicontainer: sdk pack: manifest qua dai\n");
+        return 1;
+    }
     if (try_write_file(man, mb) < 0)
         fprintf(stderr, "minicontainer: sdk pack: warning: cannot write %s: %s\n", man, strerror(errno));
     else

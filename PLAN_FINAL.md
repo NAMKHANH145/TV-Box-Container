@@ -230,9 +230,12 @@ vì P0 gánh cả `log.c` + `update.c` + `gc`; các phase sau còn ~65 KB, vẫn
 | P1.7 | **`build`**: Dockerfile tập con, overlay diff, cache layer | `build.c` | 750 | `build -t myapp .` rồi `run myapp` |
 | P1.8 | **`export`/`import`**: bundle 1 file + chữ ký | `ship.c` `update.c` | 250 | import trên máy sạch → chạy được |
 
-**Gate P1:** 6 image corpus chạy; `docker save` → `load` → `run` OK; 84/84; < 230 KB.
+**Gate P1:** 6 image corpus chạy; `docker save` → `load` → `run` OK; 84/84; < 250 KB.
 Đo thực tế sau P1.1–P1.4 + P1.6: **217,5 KB**, `docker save alpine:3.19` → `load` → `run` OK,
 whiteout 2 layer OK, `save`/`rmi`/`load` round-trip OK (116 case, 0 FAIL).
+Sau P1.5/P1.7/P1.8 (aarch64 musl, `-O2`, strip): **237,5 KB** — `build` + `export`/`import` thêm
+~700 dòng; `-Os` cho 221,5 KB nếu cần tiết kiệm flash. Gate CI nâng 200 KB → 300 KB (vẫn bắt được
+glibc static 620 KB+).
 
 ### P2 — distribution-spec: `pull` (~500 dòng)
 

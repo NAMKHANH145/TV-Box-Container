@@ -26,6 +26,18 @@ int child_fn(void *arg) {
 
     /* P1: image Env must be applied before chroot (the store lives outside). */
     if (c->image) img_apply_env(c->image);
+    /* --env / process.env from OCI config: explicit flags win over image Env. */
+    for (int i = 0; i < c->nenv; i++) {
+        char buf[BUF_SIZE_LARGE];
+        snprintf(buf, sizeof buf, "%s", c->env[i]);
+        char *eq = strchr(buf, '=');
+        if (!eq) {
+            fprintf(stderr, "minicontainer: --env wants KEY=VALUE, got '%s'\n", c->env[i]);
+            die("--env");
+        }
+        *eq = '\0';
+        setenv(buf, eq + 1, 1);
+    }
 
     /* P0.2: detached run — hand stdout/stderr to the logger's pipes.
      * dup2 clears O_CLOEXEC, so the copies survive execvp; the originals

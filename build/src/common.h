@@ -117,6 +117,12 @@ struct cfg {
     const char *net;
     const char *hostname;
     char **cmd;
+    char **env;          /* P1.5: KEY=VALUE list */
+    int nenv;
+    const char *workdir; /* -w / process.cwd */
+    const char *user;    /* --user UID[:GID] */
+    char **mounts;       /* P1.5: type:source:dest[:opts] */
+    int nmounts;
     int seccomp_mode;   /* 0=default deny-list, 1=strict allow-list, 2=off */
     char **publish;      /* "hostport:containerport", NULL-terminated */
     int npublish;
@@ -181,11 +187,25 @@ int do_stop(const char *id, int timeout);
 int do_rm(const char *id, int force);
 int do_gc(int dry);
 
+/* json.c — jsmn helpers (jsmntok_t is `struct jsmntok`, see jsmn.h). */
+struct jsmntok;
+int json_parse_file(const char *path, char **js, struct jsmntok **toks, int *ntok);
+void json_free(char *js, struct jsmntok *toks);
+int json_tok_eq(const char *js, const struct jsmntok *t, const char *s);
+void json_tok_copy(const char *js, const struct jsmntok *t, char *out, size_t n);
+int json_tok_skip(const struct jsmntok *t, int i);
+int json_obj_get(const char *js, const struct jsmntok *t, int obj, const char *key);
+int json_arr_nth(const struct jsmntok *t, int arr, int n);
+
 /* P0.6: verify <pkg>.sig (minisign format) against a public key file. */
 int verify_signature(const char *pkg, const char *keypath);
 
 /* P1: OCI image store (load / images / rmi / run --image). */
+const char *img_base(void);
 int img_load(const char *file, const char *tag_override);
+int do_build(int argc, char **argv);
+int do_export(const char *image, const char *out);
+int do_import(const char *bundle, const char *key);
 int img_rootfs(const char *name, char *out, size_t n);
 int do_images(int json);
 int do_rmi(const char *name);
@@ -245,6 +265,8 @@ void namespace_setup_dev(const char *rootfs);
 void namespace_setup_ro(const char *rootfs);
 void namespace_chroot(const char *rootfs);
 void namespace_mount_proc(void);
+void namespace_apply_mounts(struct cfg *c);
+void namespace_setup_identity(struct cfg *c);
 int namespace_remount_ro(const char *rootfs);
 void namespace_install_seccomp(int seccomp_mode);
 void namespace_child_setup(struct cfg *c, int detach);
