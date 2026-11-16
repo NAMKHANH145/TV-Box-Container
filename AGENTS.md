@@ -118,14 +118,18 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 2. `bash test.sh` trên box đã chạy 2026-11-17: **184 PASS / 0 FAIL / 1 SKIP / 185** (SKIP là
    `P3.8 --emulate`). Còn lại: Ctrl-C 20 lần liền để kiểm đường dọn dẹp.
    **Không chạy test.sh đồng thời với soak.sh** (assertion cleanup là toàn cục, sẽ FAIL oan).
-3. v2.0.0 đã xong P0–P4 + P6, suite xanh trên cả 2 máy, nhưng **chưa tag**: còn phần hardware-only
-   (`/dev/watchdog` thật, reboot 5 lần, p50, 6-image corpus), rồi `bash build/release.sh` + tag.
-   Bản `v1.5.4` tag 2026-11-12 (84/84, soak 6000) là mốc cuối đã phát hành.
-   Lưu ý: `v1.5.3` có CI build đỏ (trùng `install_filter_strict`) — dùng `v1.5.4` trở đi.
+3. **v2.0.0 đã tag + release published** (2026-11-17, 8 asset): hardware-only đã verify
+   `/dev/watchdog` thật (reset ~2 s) + 5 reboot liên tiếp (0 leftover) + journald. Còn lại: p50,
+   6-image corpus, `nginx`+`redis` name resolution, soak 24 h. Bản `v1.5.4` tag 2026-11-12
+   (84/84, soak 6000) là mốc cuối trước đó. Lưu ý: `v1.5.3` có CI build đỏ (trùng
+   `install_filter_strict`) — dùng `v1.5.4` trở đi.
 4. Verify 4 asset musl trên phần cứng thật (hiện chỉ aarch64 build local); asset mới có kèm
    `smoke-sdk.sh` nên mỗi arch tự kiểm được `sdk` mà không cần root.
 5. Self-hosted runner aarch64 chạy `test.sh` trước release.
 
+Đã xong 2026-11-17: stranger install test (container sạch, 22 s + curl 200 qua bridge), docs sync
+(README quickstart bước 5 + nginx recipe, COMPAT limits, CHANGELOG, VERIFICATION_LOG), tag `v2.0.0`
++ release 8 asset, CI xanh (run `43946343461`).
 Đã xong 2026-10-30 (không cần box): tag `v1.4.0`, `sdk init/pack` + 10 test, `smoke-sdk.sh` + job CI,
 `profiles/build.sh --clean` + kiểm dung lượng, LICENSE MIT, signal handler `run.c` async-signal-safe.
 

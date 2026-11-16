@@ -3,7 +3,7 @@
 > Mục tiêu: **runtime tương thích OCI, chạy được image Docker không sửa gì**, vẫn là 1 binary C
 > tĩnh dưới 300 KB, 0 daemon, 0 MB RAM khi rảnh, và **mọi tuyên bố đều có lệnh kiểm chứng**.
 >
-> Hiện trạng: **v2.0.0 (P0–P4 + P6 đã commit trên `main`, chưa tag)** · ~6.000 dòng C · 284.208 B
+> Hiện trạng: **v2.0.0 đã tag + release published** (2026-11-17, 8 asset, CI xanh) · ~6.000 dòng C · 277.400 B (musl CI) / 284.208 B (Buildroot local)
 > (aarch64 musl, CI) · suite **185 case**: box S905W **184 PASS/0 FAIL/1 SKIP**, Ubuntu 24.04 CI
 > **178 PASS/0 FAIL/7 SKIP** (2026-11-17) · p50 61 ms trên box · 5 vòng reboot sạch · watchdog thật
 > reset được · journald thật · ship microservice 2 chiều laptop↔box · 4 arch build < 300 KB và
@@ -77,7 +77,7 @@ Ba bài test, phải qua trước khi nói "dùng được":
 
 | Test | Cách đo | Ngưỡng |
 |---|---|---|
-| **Người lạ cài** | 3 người chưa từng xem repo, chỉ đọc README | cài + chạy `nginx` trong **< 10 phút**, không hỏi gì |
+| **Người lạ cài** | 3 người chưa từng xem repo, chỉ đọc README | cài + chạy web trong **< 10 phút**, không hỏi gì (stock `nginx:alpine` không chạy được — initgroups EPERM + rootfs RO; dùng `recipes/nginx` hoặc busybox httpd) |
 | **Recipe chạy** | 5 recipe trong `recipes/` trên 2 distro (Ubuntu 22.04, 24.04) | 10/10 lượt chạy được |
 | **Báo lỗi đủ thông tin** | issue mới theo template | có `check --json` + `version --json` + log |
 

@@ -56,8 +56,14 @@ binary under the 300 KB CI ceiling.
 
 ### Known limitations
 
-- Hardware-only gates remain unverified until an S905W is available: real `/dev/watchdog` reset,
-  five clean reboots, p50 latency, 6-image corpus, and `nginx` + `redis` name resolution.
+- Hardware-only gates verified on S905W (2026-11-17): real `/dev/watchdog` reset (magic close +
+  kill -9 feeder → board reset ~2 s), five clean reboots with no leftover cgroup/mcbr0/veth/rule/state,
+  journald events visible. Still unverified: p50 latency, 6-image corpus, `nginx` + `redis` name
+  resolution, 24 h soak.
+- Stranger install test (2026-11-17): one-command install in a clean Ubuntu 24.04 container in 22 s,
+  alpine `cat /etc/alpine-release` → 3.19.9, busybox httpd over the bridge → curl 200, total 174 s.
+  Stock `nginx:alpine` does not run out-of-the-box (initgroups EPERM + non-writable rootfs); use
+  `recipes/nginx`.
 - Compose over `network: bridge` with a published port is covered by the gateway recipe on both
   machines; compose with `volumes`/`environment` lists still has no dedicated test case.
 - A signed update package's success path is not covered by a fixture (unsigned/invalid packages
