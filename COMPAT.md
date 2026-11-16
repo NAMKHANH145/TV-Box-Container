@@ -24,6 +24,7 @@ with the command used to check it. If a mandatory row fails, `minicontainer chec
 | `--seccomp=FILE.json` | JSON profile using syscall names in the built-in subset | `minicontainer run --seccomp=profile.json ...` |
 | `update ... diff/patch` | `zstd` on the host | `command -v zstd` |
 | `update apply --health-cmd` | a working rootfs and the same kernel features as `run` | `minicontainer update apply ... --health-cmd='true'` |
+| `--verify=KEY` / `pull --sig=KEY` | `openssl` on the host, plus a **pure Ed25519** minisign signature (algorithm `Ed`); the newer prehashed `ED` mode (Ed25519ph + BLAKE2b-512) is **not** accepted — sign with `build/sign-package.py` | `minicontainer update apply pkg.tar --verify=key.pub` |
 | hardware watchdog | `/dev/watchdog` exposed by the board | `test -c /dev/watchdog` |
 | journald events | `/run/systemd/journal/socket` (optional) | `test -S /run/systemd/journal/socket` |
 | `service create` | systemd | `systemctl --version` |
@@ -78,13 +79,16 @@ with the command used to check it. If a mandatory row fails, `minicontainer chec
 
 The numbers in this repository were produced on:
 
-- x86_64, Ubuntu 22.04, host kernel `6.8.0-124-generic`, cgroup v2 (root).
-  `build/local-test.sh`: **176 PASS / 0 FAIL / 7 SKIP (183 total)**.
-- aarch64 musl cross-build: 284,208 bytes, 0 warnings.
+- x86_64, Ubuntu 22.04 / Ubuntu 24.04 privileged container, host kernel `6.8.0-124-generic`:
+  **178 PASS / 0 FAIL / 7 SKIP (185 total)** with the CI job's own command.
+- aarch64 musl: 277,400 bytes (CI toolchain) / 284,208 bytes (local Buildroot), 0 warnings.
 - S905W, Ubuntu 26.04, kernel `6.18.38-meson64`, 1.8 GB RAM, root:
-  `bash test.sh` **182 PASS / 0 FAIL / 1 SKIP (183 total)**, `run /bin/true` **p50 61 ms**,
-  reboot with live containers leaves no cgroup/veth/iptables/state, five recipes plus a
+  `bash test.sh` **184 PASS / 0 FAIL / 1 SKIP (185 total)**, `run /bin/true` **p50 61 ms**,
+  five reboots with live containers leave no cgroup/veth/iptables/state, `/dev/watchdog` feeds and
+  a killed feeder does reset the board, journald receives `container start/exit`, five recipes plus a
   microservice shipped from a laptop run there unchanged.
+- Four architectures build under the 300 KB gate: aarch64 277,400 / armv7l 260,092 /
+  riscv64 248,696 / x86_64 253,136 bytes, and `install.sh` installs the right asset for each.
 
-Hardware-only rows still pending: real `/dev/watchdog` reset, five- reboot loop, 24 h soak.
-See [progress/VERIFICATION_LOG.md](progress/VERIFICATION_LOG.md).
+Still pending: 24 h soak (deferred on purpose). See
+[progress/VERIFICATION_LOG.md](progress/VERIFICATION_LOG.md).

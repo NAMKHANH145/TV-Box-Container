@@ -399,6 +399,13 @@ int do_update_cli(int argc, char **argv) {
             fprintf(stderr, "update: mkdtemp: %s\n", strerror(errno));
             return 1;
         }
+        /* mkdtemp gives 0700, but the health check runs the staged rootfs as the
+         * mapped container uid (host 65534): it must be able to traverse here. */
+        if (chmod(stage, 0755) < 0) {
+            fprintf(stderr, "update: chmod %s: %s\n", stage, strerror(errno));
+            rm_tree(stage);
+            return 1;
+        }
         char *const tav[] = { "tar", "-xf", (char *)pkg, "-C", stage,
                               "--numeric-owner", "--xattrs", "--xattrs-include=*", NULL };
         char *const tav_plain[] = { "tar", "-xf", (char *)pkg, "-C", stage, "--numeric-owner", NULL };

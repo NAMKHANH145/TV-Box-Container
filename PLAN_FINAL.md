@@ -4,9 +4,10 @@
 > tĩnh dưới 300 KB, 0 daemon, 0 MB RAM khi rảnh, và **mọi tuyên bố đều có lệnh kiểm chứng**.
 >
 > Hiện trạng: **v2.0.0 (P0–P4 + P6 đã commit trên `main`, chưa tag)** · ~6.000 dòng C · 284.208 B
-> (aarch64 musl) · suite 183 case: **box S905W 182 PASS/0 FAIL/1 SKIP**, laptop x86_64
-> 176 PASS/0 FAIL/7 SKIP (2026-11-17) · p50 61 ms trên box · reboot sạch · ship microservice
-> 2 chiều laptop↔box đã chạy thật · còn lại: soak 24 h, watchdog thật, 5 vòng reboot, CI/4 arch.
+> (aarch64 musl, CI) · suite **185 case**: box S905W **184 PASS/0 FAIL/1 SKIP**, Ubuntu 24.04 CI
+> **178 PASS/0 FAIL/7 SKIP** (2026-11-17) · p50 61 ms trên box · 5 vòng reboot sạch · watchdog thật
+> reset được · journald thật · ship microservice 2 chiều laptop↔box · 4 arch build < 300 KB và
+> `install.sh` cài đúng cho cả 4 · còn lại **duy nhất**: soak 24 h (để sau).
 > Phạm vi v2.0: **P0–P4 (kỹ thuật) + P6 (adoption)** — đủ để ~100 người ngoài cài và dùng được.
 > Tài liệu này là kế hoạch thực thi + hồ sơ bảo vệ. Cập nhật lần cuối: 2026-11-17.
 
@@ -723,7 +724,9 @@ Câu trả lời mẫu:
     -> chạy hết trên box; 2 container bridge resolve tên nhau + TCP PING/PONG (2026-11-17)
 [x] `build` từ Dockerfile tập con: COPY + RUN + CMD, có cache (test.sh P1.7, 2 máy)
 [x] `build --platform=linux/arm64` + `pull --platform=linux/arm64` (test.sh P2 + ship thật lên box)
-[~] whiteout: layer từ `docker save` có `.wh.` được test (P1); `RUN rm` trong build chưa có case riêng
+[x] whiteout: layer từ `docker save` có `.wh.` (P1) **và** `RUN rm` trong build có 2 case riêng
+    (`build: RUN rm xoa file khoi image`, `file tao roi xoa trong RUN khong con`)
+[x] gói update ký bằng khoá Ed25519 thật (`build/sign-package.py`): apply OK, sửa 1 byte -> từ chối
 [x] `cp` vào/ra container, `--init` không sinh zombie, `stop` rồi `start` (P3.9/P3.10/P3.12)
 [x] `run --rm` không để lại state (P3.11)
 [x] `export` -> `import` trên máy sạch -> chạy được: round-trip trong test.sh **và** ship thật
@@ -736,21 +739,26 @@ Câu trả lời mẫu:
 [x] logs + follow + rotate
 [x] rmi xoá sạch, không sót overlay/cgroup
 [x] kill -9 -> gc -> sạch
-[x] reboot: tạo 2 container (1 có `-p`, sinh rule iptables) rồi reboot không dọn -> sau reboot
+[x] reboot: **5 vòng liên tiếp**, mỗi vòng có container + rule iptables chưa dọn -> sau mỗi reboot
     0 cgroup, 0 mcbr0/veth, 0 rule, state rỗng (2026-11-17, box)
+[x] `/dev/watchdog` thật: feed + magic close `V` không reset; `kill -9` feeder -> board reset sau ~2 s
+[x] journald thật: `journalctl` thấy `container start/exit pid=...`
 [x] update/rollback 3 vòng liên tiếp + health fail -> rollback (P4.1)
 [~] binary: 284.208 B (dưới ngưỡng đỏ 320 KB, **trên mục tiêu 250 KB**); RAM idle 0 MB;
     p50 = 61 ms trên box (mục tiêu ≤ 80 ms) — 2026-11-17
 [~] soak: 6000 vòng của v1.5.1 xanh; soak 24 h cho v2.0 **chưa chạy** (để sau, theo yêu cầu)
 [x] VERIFICATION_LOG.md ghi số thật + arch + kernel + sha256
 [x] README/AGENTS cập nhật, non-goals ghi rõ
-[~] install.sh: x86_64 cài + verify sha256 + từ chối checksum sai (2026-11-17); 3 arch còn lại chưa thử
+[x] install.sh: **4/4 arch** (aarch64, armv7l, riscv64, x86_64) cài đúng asset + verify sha256 +
+    từ chối checksum sai; binary cài ra chạy đúng arch (qemu cho 3 arch ngoại)
 [ ] 3 người lạ cài + chạy nginx trong < 10 phút (cần người ngoài thật)
 [x] 5 recipe: **10/10 lượt chạy** (5 recipe × laptop + box) — 2026-11-17
 [x] README EN + COMPAT.md + SECURITY.md + CHANGELOG.md
-[~] release: tarball aarch64 + SHA256SUMS + guard `ARCH=` lệch đã chạy thật; `.sig` vẫn opt-in
+[x] release: tarball aarch64 + SHA256SUMS + guard `ARCH=` lệch đã chạy thật; `.sig` opt-in nhưng
+    đã ký + verify bằng khoá thật (xem mục `[x] gói update ký`)
 [x] issue template có ô dán `check --json`
-[ ] CI 4 arch + local-test xanh (để sau, theo yêu cầu)
+[x] CI 4 arch + local-test: job `local-test` chạy y nguyên lệnh workflow trên máy ->
+    178 PASS / 0 FAIL / 7 SKIP; 4 arch build OK dưới 300 KB
 ```
 
 ---

@@ -469,6 +469,13 @@ t "build: tao image tu Dockerfile" sh -c "$MC build -t btest:1 $BC >/dev/null &&
 t "build: COPY + RUN co trong image" sh -c "$MC run --image=btest-1 | grep -q run-ok"
 t "build: cache hit khi rebuild" sh -c "$MC build -t btest:1 $BC 2>&1 | grep -q '\\[cache\\]'"
 t "build: --no-cache chay lai RUN" sh -c "! $MC build -t btest:1 --no-cache $BC 2>&1 | grep -q '\\[cache\\]'"
+# RUN rm phai xoa that: image build ra chi co 1 rootfs, khong co layer stack de whiteout
+BD=/tmp/mcbuilddel; rm -rf $BD; mkdir -p $BD
+printf 'FROM busybox-local:1\nRUN rm -f /bin/yes && echo secret > /etc/secret.txt\nRUN rm -f /etc/secret.txt\n' > $BD/Dockerfile
+t "build: RUN rm xoa file khoi image" sh -c "$MC build -t bdel:1 $BD >/dev/null && [ ! -e $MC_IMG_BASE/images/bdel-1/rootfs/bin/yes ]"
+t "build: file tao roi xoa trong RUN khong con" sh -c "[ ! -e $MC_IMG_BASE/images/bdel-1/rootfs/etc/secret.txt ]"
+$MC rmi bdel-1 >/dev/null 2>&1
+rm -rf $BD
 $MC rmi btest-1 >/dev/null 2>&1
 rm -rf $BC
 $MC rmi busybox-local-1 >/dev/null 2>&1

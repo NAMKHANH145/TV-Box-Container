@@ -131,7 +131,11 @@ void namespace_setup_dev(const char *rootfs) {
     int edevice = 0;
     if (strlen(rootfs) > PATH_MAX) die("/dev path too long");
     if (path_join(d, sizeof d, rootfs, "dev") < 0) die("/dev path too long");
-    if (mkdir(d, 0755) < 0 && errno != EEXIST) die("mkdir /dev");
+    /* The host-side prep already made it; keep this best effort for rootfs types
+     * where the child may not write (read-only, or a slot owned by host root). */
+    if (mkdir(d, 0755) < 0 && errno != EEXIST && errno != EACCES &&
+        errno != EPERM && errno != EROFS)
+        die("mkdir /dev");
     if (mount("tmpfs", d, "tmpfs", MS_NOSUID | MS_STRICTATIME,
         "mode=755,size=1M") < 0 && errno != EBUSY)
         die("mount /dev");
@@ -258,6 +262,13 @@ int namespace_prepare_filesystem(struct cfg *c) {
      * image rootfs. */
     if (mkdir_in_root(c->rootfs, "/proc", 0555) < 0) {
         fprintf(stderr, "minicontainer: cannot create /proc mount point: %s\n", strerror(errno));
+        return -1;
+    }
+    /* Same for /dev: an A/B slot extracted from a package keeps the directory
+     * only if the tar had it, and device nodes themselves are dropped by the
+     * extractor. The child cannot mkdir it once it runs as the mapped root. */
+    if (mkdir_in_root(c->rootfs, "/dev", 0755) < 0) {
+        fprintf(stderr, "minicontainer: cannot create /dev mount point: %s\n", strerror(errno));
         return -1;
     }
     for (int i = 0; i < c->nmounts; i++) {

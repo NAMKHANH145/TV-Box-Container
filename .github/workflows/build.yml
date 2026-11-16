@@ -18,9 +18,8 @@ jobs:
       - uses: actions/checkout@v4
       - name: Build x86_64 (musl)
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
-            muslcc/x86_64:x86_64-linux-musl \
-            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer src/*.c && strip -s minicontainer'
+          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build muslcc/x86_64:x86_64-linux-musl \
+            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer $(ls src/*.c | grep -v seccomp_strict_) && strip -s minicontainer'
           stat -c '%n %s bytes' build/minicontainer
       - name: sdk init/pack (11 check, khong can root)
         run: bash build/smoke-sdk.sh
@@ -99,11 +98,12 @@ jobs:
       # only reliable way to get gcc+musl here. musl is what keeps the assets
       # ~220-240KB: glibc static costs 620-930KB for the same code.
       # Flags mirror build/Makefile (the images ship no make, only the compiler).
+      # src/seccomp_strict_*.c are generated per arch and all define the same
+      # symbols, so only one may be compiled (the Makefile filters them too).
       - name: Build static binary (musl)
         run: |
-          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
-            muslcc/x86_64:${{ matrix.musl }} \
-            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer src/*.c && strip -s minicontainer'
+          docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build muslcc/x86_64:${{ matrix.musl }} \
+            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer $(ls src/*.c | grep -v seccomp_strict_) && strip -s minicontainer'
           stat -c '%n %s bytes' build/minicontainer
 
       - name: Check binary is static and not bloated

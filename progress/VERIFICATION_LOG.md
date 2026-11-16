@@ -1059,3 +1059,112 @@ userns), và `mkdir` trong `namespace_mount_proc()` chỉ còn là best-effort (
 Mục "v2.0.0 — P6 adoption" phía trên ghi size/sha của bản **trước** khi sửa mountpoint `/proc`
 (`f400e3b7…` / `b6a46b12…`). Bản cuối cùng là bảng ở đầu mục này; các số recipe/suite/ship trong cả
 hai mục đều đo trên phần cứng thật, không ước lượng.
+
+## v2.0.0 — Phần cứng thật + 4 arch + CI (2026-11-17, phiên 3)
+
+### Build 4 arch musl (đúng lệnh CI, `muslcc/x86_64:<target>`)
+
+| Arch | Kích thước | Ghi chú |
+|---|---|---|
+| aarch64 | **277.400 B** | asset phát hành; bản Buildroot local 284.208 B (khác compiler nên lệch vài KB) |
+| armv7l | **260.092 B** | `armv7l-linux-musleabihf` |
+| riscv64 | **248.696 B** | |
+| x86_64 | **253.136 B** | |
+
+Cả 4 đều < 300 KB (ngưỡng đỏ CI) và chạy được `--version` đúng arch:
+`minicontainer 2.0.0 (aarch64|armv7l|riscv64|x86_64, musl, static)` — aarch64/armv7l/riscv64 chạy
+qua binfmt qemu trên laptop.
+
+Binary dev trên laptop (glibc static, gcc 12): **1.129.344 B**, sha256
+`faf7326a9f6e8d1bd6100c32fa3b6827359f0b0cedf69bff76b93195fbcf33db`; bản aarch64 Buildroot trên box:
+**284.208 B**, sha256 `5b9c54f460fd4160c05e90a8392342f0660159f598e43d1eb9e359e50fbab525`.
+
+### `install.sh` trên **4 arch** (release giả `file://`, uname giả qua PATH)
+
+```
+PASS aarch64 -> minicontainer 2.0.0 (aarch64, musl, static)
+PASS armv7l  -> minicontainer 2.0.0 (armv7l, musl, static)
+PASS riscv64 -> minicontainer 2.0.0 (riscv64, musl, static)
+PASS x86_64  -> minicontainer 2.0.0 (x86_64, musl, static)
+INSTALL_SH=4/4 fail=0
+```
+
+Mỗi lần: `MC_BASE_URL=file://… PREFIX=/usr/local DESTDIR=… sh install.sh --no-check` → tải đúng asset
+theo `uname -m`, verify `SHA256SUMS.txt`, cài `bin/minicontainer` và in đúng arch.
+
+### `/dev/watchdog` thật (S905W)
+
+- `/dev/watchdog` + `/dev/watchdog0` có thật (`crw-------`), nhưng **systemd đang giữ** với
+  `RuntimeWatchdogUSec=1min` → mở từ ngoài trả `EBUSY` (hành vi đúng: không tranh thiết bị với
+  watchdog của hệ điều hành).
+- Tạm đặt `RuntimeWatchdogSec=0` + `systemctl daemon-reexec` → feeder mở được, feed 4 s với
+  `--timeout=2`, thoát bằng magic close `'V'` → **hệ thống không reset** (đúng thiết kế).
+- Test reset thật: `kill -9` feeder (không có magic close) → phần cứng **reset box sau ~2 s**
+  (SSH đứt, uptime về 0). Đã khôi phục `RuntimeWatchdogSec=1min` sau test.
+
+### 5 vòng reboot liên tiếp (mỗi vòng có container + rule iptables chưa dọn)
+
+```
+vong 1: uptime 13.78 -> 12.42 | cgroup/mcbr0/nat/state = 0 0 0 0
+vong 2: uptime 15.70 -> 12.09 | 0 0 0 0
+vong 3: 15.06 -> (reboot)     | 0 0 0 0
+vong 4, 5: tương tự           | 0 0 0 0
+```
+
+Trước mỗi vòng: 1 container RUNNING + 2 rule NAT (DNAT + MASQ). Sau mỗi reboot: **0** cgroup
+`minicontainer-*`, **0** `mcbr0`, **0** veth, **0** rule `10.88`, `/run/minicontainer` rỗng.
+
+### journald thật (không libsystemd)
+
+```
+$ journalctl --since '-120s' | grep container
+Nov 16 20:28:41 tvbox minicontainer[1556]: container start pid=1557
+Nov 16 20:28:41 tvbox minicontainer[1556]: container exit pid=1557 status=0
+```
+
+### Gói update ký khoá thật (không dùng fixture)
+
+`build/sign-package.py` (mới) sinh keypair Ed25519 và ký theo minisign armor thuần:
+
+```
+$ sign-package.py keygen --key priv.key --pub mc.pub      # keyid d28d664699ef335c
+$ sign-package.py sign --key priv.key -m pkg.tar.gz       # sha256 b44080a6…
+$ minicontainer update apply pkg.tar.gz --base=… --verify=mc.pub
+Signature Verified Successfully
+verify: chu ky hop le (mc.pub)
+update: slot A installed (first slot)
+$ printf 'x' >> bad.tar.gz && minicontainer update apply bad.tar.gz --verify=mc.pub
+Signature Verification Failure
+minicontainer: verify: signature KHONG hop le
+```
+
+**Giới hạn đã biết (ghi ở COMPAT):** runtime verify Ed25519 *thuần* trên toàn file — đúng với
+chế độ legacy `Ed` của minisign; chế độ mặc định mới `ED` (Ed25519ph + BLAKE2b-512) **chưa** hỗ trợ.
+`sign-package.py` vì vậy phát ra đúng định dạng runtime verify được.
+
+### CI: chạy đúng job `local-test` của workflow ngay trên máy
+
+Lệnh y nguyên workflow (`ubuntu:24.04 --privileged`, cgroup delegate, `make CC=gcc`, `local-test.sh`):
+
+```
+=== KET QUA: PASS=178 FAIL=0 SKIP=7 TONG=185 ===
+```
+
+### Suite 185 case (thêm 2 case cho `RUN rm`)
+
+| Máy | Kết quả |
+|---|---|
+| Box S905W (aarch64) | **PASS=184 FAIL=0 SKIP=1 TONG=185** |
+| Ubuntu 24.04 privileged container (CI) | **PASS=178 FAIL=0 SKIP=7 TONG=185** |
+
+### 3 lỗi thật sửa trong phiên này
+
+1. **`update apply` không chạy được health check**: `mkdtemp()` tạo stage `0700` root-owned, trong khi
+   health check chạy rootfs dưới mapped root (host 65534) → `mount /dev: EACCES`. Sửa: `chmod(stage, 0755)`.
+2. **`RUN rm` chưa có test**: image build ra materialize 1 rootfs nên xoá là xoá thật — đã thêm 2 case
+   (`build: RUN rm xoa file khoi image`, `file tao roi xoa trong RUN khong con`).
+3. **`images` báo SIZE sai với image nhiều hardlink** (busybox hiện 412,8 MB trong khi đĩa chỉ 4,4 MB):
+   `disk_usage()` cộng `st_blocks` theo từng path. Sửa: dedupe theo inode (bảng băm 16 K, tràn thì
+   đếm — chỉ có thể báo cao, không bao giờ báo thấp).
+4. (kèm) `/dev` mount point cũng phải tạo ở phía host như `/proc`, nếu không slot A/B giải nén từ
+   package (không giữ device node) sẽ chết ở `mount /dev`.

@@ -2,12 +2,12 @@
 
 > Đọc file này trước khi làm bất cứ gì. Đây là dự án container runtime zero-daemon bằng C cho
 > TV Box Amlogic S905W (aarch64, 1.8 GB RAM, Ubuntu 26.04, kernel `6.18.38-meson64`).
-> Trạng thái: **v2.0.0** (P0–P4 + P6 đã commit trên `main`, **chưa tag**) · `test.sh` **183 case**:
-> box S905W **182 PASS / 0 FAIL / 1 SKIP**, laptop x86_64 **176 PASS / 0 FAIL / 7 SKIP** (đo
-> 2026-11-17) · gate P6.4 **10/10** (5 recipe × 2 máy; box aarch64 chạy gateway compose thật, laptop
-> `curl` sang được) · binary aarch64 musl **284.208 B** · v1.5.4 (2026-11-12) là mốc đã phát hành ·
-> phần **hardware-only** của v2.0 (watchdog thật, 5 reboot, p50, soak 24 h, corpus 6 image) **chưa
-> verify** — box đã có, dùng `BOX=<IP_BOX>`.
+> Trạng thái: **v2.0.0** · `test.sh` **185 case**: box S905W **184 PASS / 0 FAIL / 1 SKIP**, Ubuntu
+> 24.04 CI **178 PASS / 0 FAIL / 7 SKIP** (đo 2026-11-17) · gate P6.4 **10/10** (5 recipe × 2 máy) ·
+> binary musl **277.400 B** (aarch64 CI) / 284.208 B (Buildroot local) · p50 **61 ms** trên box ·
+> 5 vòng reboot sạch · `/dev/watchdog` reset thật đã kiểm · journald thật · 4 arch build < 300 KB và
+> `install.sh` cài đúng cả 4 · ship container 2 chiều laptop↔box đã chạy thật · **việc còn lại duy
+> nhất: soak 24 h** (chủ động để sau).
 
 ## 1. Thứ tự đọc (khoảng 25 phút)
 
@@ -114,7 +114,8 @@ ssh root@<IP_BOX> 'cd /root && bash test.sh'          # 74/74 PASS
 ## 6. Việc tiếp theo (theo thứ tự)
 
 1. Soak 24 h: `ITER=117000 bash build/soak.sh` trên box, ghi kết quả vào `progress/VERIFICATION_LOG.md`.
-2. `bash test.sh` trên box đã chạy 2026-11-17: **182 PASS / 0 FAIL / 1 SKIP / 183** (SKIP là
+   Đây là việc **duy nhất** còn lại của v2.0.
+2. `bash test.sh` trên box đã chạy 2026-11-17: **184 PASS / 0 FAIL / 1 SKIP / 185** (SKIP là
    `P3.8 --emulate`). Còn lại: Ctrl-C 20 lần liền để kiểm đường dọn dẹp.
    **Không chạy test.sh đồng thời với soak.sh** (assertion cleanup là toàn cục, sẽ FAIL oan).
 3. v2.0.0 đã xong P0–P4 + P6, suite xanh trên cả 2 máy, nhưng **chưa tag**: còn phần hardware-only

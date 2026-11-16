@@ -29,9 +29,17 @@ binary under the 300 KB CI ceiling.
 ### Changed
 
 - Build defaults to `-Os -ffunction-sections -fdata-sections -Wl,--gc-sections`; the aarch64 musl
-  binary is **284,208 bytes**, 0 warnings (x86_64 glibc dev build: 1,197,584 bytes).
-- Test matrix is **183 cases**: **182 PASS / 0 FAIL / 1 SKIP** on the S905W box (aarch64) and
-  176 PASS / 0 FAIL / 7 SKIP on x86_64; see the verification log.
+  binary is **277,400 bytes** with the CI toolchain (284,208 with the local Buildroot one);
+  armv7l 260,092, riscv64 248,696, x86_64 253,136 — all under the 300 KB red line.
+- Test matrix is **185 cases**: **184 PASS / 0 FAIL / 1 SKIP** on the S905W box (aarch64) and
+  178 PASS / 0 FAIL / 7 SKIP in the Ubuntu 24.04 CI container; see the verification log.
+- `install.sh` verified on all four architectures (right asset, SHA256 checked, binary runs).
+- `minicontainer images` reports allocated size deduplicated by inode, so hardlink farms such as
+  `busybox:latest` show 4.4 MB instead of 412 MB.
+- `update apply` health checks now work from an A/B slot: the staging directory is world-traversable
+  (mkdtemp's 0700 blocked the mapped container uid) and `/dev` is created host-side like `/proc`.
+- New `build/sign-package.py` signs packages/bundles in the minisign armor the runtime verifies
+  (pure Ed25519, `Ed`; the prehashed `ED` mode is documented as unsupported).
 - `install.sh` refuses to replace the binary while containers are running unless `--force`.
 
 ### Fixed — found by running the five recipes (gate P6.4, 10/10 on two machines)

@@ -13,17 +13,43 @@
 
 /* nftw callback to accumulate disk usage */
 static long long g_du_total;
+
+/* Images are hardlink farms (busybox:latest has ~400 links to one binary), so
+ * summing st_blocks per path overcounts by the link count. `du` counts each
+ * inode once; do the same with a small open-addressing set. Overflow falls back
+ * to counting, which can only over-report, never under-report. */
+#define DU_HSIZE 16384
+static ino_t g_du_ino[DU_HSIZE];
+static unsigned char g_du_seen[DU_HSIZE];
+
+static int du_first_sight(const struct stat *st) {
+    size_t h = ((size_t)st->st_ino ^ ((size_t)st->st_dev << 13)) & (DU_HSIZE - 1);
+    for (size_t i = 0; i < DU_HSIZE; i++) {
+        size_t k = (h + i) & (DU_HSIZE - 1);
+        if (!g_du_seen[k]) {
+            g_du_seen[k] = 1;
+            g_du_ino[k] = st->st_ino;
+            return 1;
+        }
+        if (g_du_ino[k] == st->st_ino) return 0;
+    }
+    return 1;
+}
+
 static int du_cb(const char *path, const struct stat *st, int flag, struct FTW *ftw) {
     (void)path; (void)ftw;
     /* du semantics: count blocks of files, directories, and symlinks */
-    if (flag == FTW_F || flag == FTW_D || flag == FTW_SL)
-        g_du_total += (long long)st->st_blocks * 512;
+    if (flag == FTW_F || flag == FTW_D || flag == FTW_SL) {
+        if (du_first_sight(st))
+            g_du_total += (long long)st->st_blocks * 512;
+    }
     return 0;
 }
 
 long long disk_usage(const char *path) {
     if (!path) return -1;
     g_du_total = 0;
+    memset(g_du_seen, 0, sizeof g_du_seen);
     /* FTW_PHYS: do not follow symlinks (Alpine uses absolute links).
      * FTW_MOUNT: never cross into a bind mount under the rootfs. */
     if (nftw(path, du_cb, 16, FTW_PHYS | FTW_MOUNT) != 0)
