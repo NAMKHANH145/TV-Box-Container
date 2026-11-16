@@ -403,7 +403,131 @@ int do_rm(const char *id, int force) {
     snprintf(f, sizeof f, "%s/seccomp", dir); unlink(f);
     snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
     snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
+    log_purge(dir);
     rmdir(dir);
     printf("%s: removed\n", id);
+    return 0;
+}
+
+/* ---- P0.3: gc — reconcile state left behind by kill -9 / power loss ---- */
+
+static int pid_running(int pid) {
+    if (pid <= 0) return 0;
+    char p[BUF_SIZE_SMALL], buf[BUF_SIZE_MEDIUM];
+    snprintf(p, sizeof p, "/proc/%d/stat", pid);
+    if (read_small(p, buf, sizeof buf) < 0) return 0;
+    char *e = strrchr(buf, ')');
+    return e && e[1] == ' ' && e[2] && e[2] != 'Z';
+}
+
+/* Remove one state dir if nothing in it is alive. Returns 1 if it was stale. */
+static int gc_state(const char *name, int dry) {
+    char dir[BUF_SIZE_LARGE], f[PATH_MAX + 16], buf[BUF_SIZE_MEDIUM];
+    char cg[PATH_MAX] = "", ipbuf[BUF_SIZE_SMALL] = "", pubbuf[BUF_SIZE_LARGE] = "";
+    snprintf(dir, sizeof dir, STATE_BASE "/%s", name);
+    snprintf(f, sizeof f, "%s/pid", dir);
+    if (read_small(f, buf, sizeof buf) < 0) return 0;      /* not a container dir */
+    int pid = atoi(buf);
+    snprintf(f, sizeof f, "%s/cgdir", dir);   read_small(f, cg, sizeof cg);
+    snprintf(f, sizeof f, "%s/ip", dir);      read_small(f, ipbuf, sizeof ipbuf);
+    snprintf(f, sizeof f, "%s/publish", dir); read_small(f, pubbuf, sizeof pubbuf);
+    snprintf(f, sizeof f, "%s/watchdog", dir);
+    int wd = (read_small(f, buf, sizeof buf) == 0) ? atoi(buf) : 0;
+
+    int cg_live = (cg[0] && access(cg, F_OK) == 0 && !cgroup_empty(cg));
+    if (pid_running(pid) || cg_live) return 0;             /* still a live container */
+
+    printf("gc: %s (pid %d da chet)%s\n", name, pid, dry ? " [dry-run]" : "");
+    if (dry) return 1;
+
+    if (cg[0] && state_cgdir_valid(cg) && access(cg, F_OK) == 0) {
+        cgroup_kill(cg);
+        for (int i = 0; i < 50 && !cgroup_empty(cg); i++) usleep(100000);
+        for (int i = 0; i < 20 && rmdir(cg) < 0 && errno != ENOENT; i++) usleep(100000);
+    }
+    if (ipbuf[0] && pid > 0) {
+        char *pubs[16];
+        int np = parse_publish_array(pubbuf, pubs, 16);
+        bridge_teardown(pid, pubs, np);
+    }
+    if (wd > 1) kill(wd, SIGTERM);
+
+    snprintf(f, sizeof f, "%s/pid", dir);           unlink(f);
+    snprintf(f, sizeof f, "%s/cgdir", dir);         unlink(f);
+    snprintf(f, sizeof f, "%s/cmd", dir);           unlink(f);
+    snprintf(f, sizeof f, "%s/rootfs", dir);        unlink(f);
+    snprintf(f, sizeof f, "%s/ip", dir);            unlink(f);
+    snprintf(f, sizeof f, "%s/publish", dir);       unlink(f);
+    snprintf(f, sizeof f, "%s/watchdog", dir);      unlink(f);
+    snprintf(f, sizeof f, "%s/seccomp", dir);       unlink(f);
+    snprintf(f, sizeof f, "%s/disk_exceeded", dir); unlink(f);
+    snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
+    log_purge(dir);
+    rmdir(dir);
+    return 1;
+}
+
+/* Orphan cgroups: minicontainer-<pid>-<n> whose pid is gone. A fresh dir is
+ * skipped for 60 s so gc can never race a `run` that is still setting up. */
+static int gc_cgroups(int dry) {
+    DIR *d = opendir(CGROUP_BASE);
+    if (!d) return 0;
+    int n = 0;
+    struct dirent *e;
+    while ((e = readdir(d))) {
+        if (strncmp(e->d_name, "minicontainer-", 14) != 0) continue;
+        int pid = atoi(e->d_name + 14);
+        if (pid_running(pid)) continue;
+        char cg[PATH_MAX];
+        snprintf(cg, sizeof cg, CGROUP_BASE "/%s", e->d_name);
+        struct stat st;
+        if (stat(cg, &st) < 0) continue;
+        time_t now = time(NULL);
+        if (now - st.st_mtime < 60) continue;
+        if (cgroup_empty(cg)) {
+            printf("gc: cgroup rac %s%s\n", e->d_name, dry ? " [dry-run]" : "");
+            if (!dry) rmdir(cg);
+            n++;
+            continue;
+        }
+        /* Non-empty but every member is dead/zombie: kill then remove. */
+        int live = 0;
+        char pf[PATH_MAX + 16];
+        snprintf(pf, sizeof pf, "%s/cgroup.procs", cg);
+        FILE *f = fopen(pf, "r");
+        if (f) {
+            char line[BUF_SIZE_SMALL];
+            while (fgets(line, sizeof line, f))
+                if (pid_running(atoi(line))) live = 1;
+            fclose(f);
+        }
+        if (live) continue;
+        printf("gc: cgroup mo coi %s%s\n", e->d_name, dry ? " [dry-run]" : "");
+        if (!dry) {
+            cgroup_kill(cg);
+            for (int i = 0; i < 50 && !cgroup_empty(cg); i++) usleep(100000);
+            for (int i = 0; i < 20 && rmdir(cg) < 0 && errno != ENOENT; i++) usleep(100000);
+        }
+        n++;
+    }
+    closedir(d);
+    return n;
+}
+
+int do_gc(int dry) {
+    int n = 0;
+    DIR *d = opendir(STATE_BASE);
+    if (d) {
+        struct dirent *e;
+        while ((e = readdir(d))) {
+            if (e->d_name[0] == '.') continue;
+            if (!valid_name(e->d_name)) continue;
+            n += gc_state(e->d_name, dry);
+        }
+        closedir(d);
+    }
+    n += gc_cgroups(dry);
+    if (n == 0) printf("gc: khong co gi de don\n");
+    else printf("gc: %d muc%s\n", n, dry ? " (dry-run, chua xoa)" : " da don");
     return 0;
 }

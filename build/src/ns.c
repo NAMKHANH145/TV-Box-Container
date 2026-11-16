@@ -24,8 +24,19 @@ int child_fn(void *arg) {
      * to 127.0.0.1 will fail. Host uses host's lo, no need to touch. */
     if (strcmp(c->net, "host") != 0) netns_lo_up();
 
+    /* P0.2: detached run — hand stdout/stderr to the logger's pipes.
+     * dup2 clears O_CLOEXEC, so the copies survive execvp; the originals
+     * were CLOEXEC and vanish. Done before seccomp so dup2 is never filtered. */
+    int logged = (a->out_w >= 0);
+    if (logged) {
+        dup2(a->out_w, 1);
+        dup2(a->err_w, 2);
+        int nfd = open("/dev/null", O_RDONLY);
+        if (nfd >= 0) { dup2(nfd, 0); if (nfd > 2) close(nfd); }
+    }
+
     /* Full namespace setup: rootfs, dev, chroot, proc, ro, seccomp */
-    namespace_child_setup(c, a->detach);
+    namespace_child_setup(c, a->detach && !logged);
 
     execvp(c->cmd[0], c->cmd);
     die("execvp");

@@ -189,3 +189,27 @@ void validate_input(struct cfg *c) {
             die_msg("--rootfs must have /bin");
     }
 }
+
+/* elf_arch — read e_machine from the ELF header (offset 18, 2 bytes LE).
+ * Used by `sdk pack` (stamp arch) and `run` (refuse a rootfs for another arch). */
+int elf_arch(const char *path, char *out, size_t n) {
+    int fd = open(path, O_RDONLY);
+    if (fd < 0) return -1;
+    unsigned char h[20];
+    ssize_t r = read(fd, h, sizeof h);
+    close(fd);
+    if (r < (ssize_t)sizeof h) return -1;
+    if (h[0] != 0x7f || h[1] != 'E' || h[2] != 'L' || h[3] != 'F') return -1;
+    unsigned m = (unsigned)h[18] | ((unsigned)h[19] << 8);
+    const char *name;
+    switch (m) {
+    case 0xB7: name = "aarch64"; break;
+    case 0x3E: name = "x86_64";  break;
+    case 0x28: name = "armv7l";  break;
+    case 0xF3: name = "riscv64"; break;
+    case 0x03: name = "i386";    break;
+    default: return -1;
+    }
+    snprintf(out, n, "%s", name);
+    return 0;
+}

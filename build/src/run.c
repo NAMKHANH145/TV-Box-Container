@@ -183,6 +183,19 @@ static int wait_child(pid_t child, int *status, long disk_limit, long long disk_
 }
 
 int do_run(struct cfg *c) {
+    /* P0.1: refuse a rootfs built for another arch before touching cgroups. */
+    if (c->rootfs) {
+        char rarch[BUF_SIZE_SMALL];
+        char shp[PATH_MAX + BUF_SIZE_SMALL];
+        snprintf(shp, sizeof shp, "%s/bin/sh", c->rootfs);
+        if (elf_arch(shp, rarch, sizeof rarch) == 0 && strcmp(rarch, MC_ARCH) != 0) {
+            fprintf(stderr, "minicontainer: rootfs la %s, may nay la %s\n", rarch, MC_ARCH);
+            fprintf(stderr, "  -> dung ban <app>-%s-rootfs.tar.gz, hoac: build --platform=linux-%s\n",
+                    MC_ARCH, MC_ARCH);
+            return EXIT_SETUP_ERROR;
+        }
+    }
+
     char cgdir[PATH_MAX];
     cgroup_setup(c, cgdir);
 
@@ -200,6 +213,13 @@ int do_run(struct cfg *c) {
     /* 2 sync pipes: ready (child->parent: entered userns) + go (parent->child: all done) */
     int readyfd[2], gofd[2];
     if (pipe2(readyfd, O_CLOEXEC) < 0 || pipe2(gofd, O_CLOEXEC) < 0) die("pipe");
+
+    /* P0.2: detached containers write stdout/stderr into pipes so a logger
+     * can frame them as json-file. Foreground keeps the tty untouched. */
+    int lout[2] = { -1, -1 }, lerr[2] = { -1, -1 };
+    if (c->detach) {
+        if (pipe2(lout, O_CLOEXEC) < 0 || pipe2(lerr, O_CLOEXEC) < 0) die("pipe log");
+    }
     char *stack = malloc(STACK_SIZE);
     if (!stack) die("malloc stack");
 
@@ -208,11 +228,13 @@ int do_run(struct cfg *c) {
         flags |= CLONE_NEWNET;
 
     struct child_arg carg = { .c = c, .go_rd = gofd[0], .ready_wr = readyfd[1],
-                             .detach = c->detach };
+                             .detach = c->detach,
+                             .out_w = lout[1], .err_w = lerr[1] };
     memcpy(carg.cgdir, cgdir, sizeof cgdir);
     pid_t child = clone(child_fn, stack + STACK_SIZE, flags, &carg);
     if (child < 0) die("clone");
     close(gofd[0]); close(readyfd[1]); /* parent: read ready, write go */
+    if (c->detach) { close(lout[1]); close(lerr[1]); }
 
     /* Setup signal handler to forward signals to child */
     g_child_pid = child;
@@ -300,6 +322,33 @@ int do_run(struct cfg *c) {
                 snprintf(f, sizeof f, "%s/publish", dir);
                 write_file(f, pb);
             }
+        }
+
+        /* P0.2: json-file logger. One tiny process per detached container;
+         * exits as soon as both output pipes reach EOF (no daemon). */
+        if (lout[0] >= 0) {
+            char ldir[BUF_SIZE_LARGE];
+            if (!log_dir_for(dir, ldir, sizeof ldir)) {
+                fprintf(stderr, "minicontainer: cannot create %s/logs: %s\n", dir, strerror(errno));
+                kill(child, SIGKILL); waitpid(child, NULL, 0);
+                cgroup_cleanup(c, cgdir);
+                return 1;
+            }
+            pid_t lg = fork();
+            if (lg == 0) {
+                setsid();
+                int nfd = open("/dev/null", O_RDWR);
+                if (nfd >= 0) { dup2(nfd, 0); dup2(nfd, 1); dup2(nfd, 2); if (nfd > 2) close(nfd); }
+                log_logger(lout[0], lerr[0], ldir);
+                _exit(0);
+            }
+            if (lg < 0) {
+                fprintf(stderr, "minicontainer: cannot start log driver: %s\n", strerror(errno));
+                kill(child, SIGKILL); waitpid(child, NULL, 0);
+                cgroup_cleanup(c, cgdir);
+                return 1;
+            }
+            close(lout[0]); close(lerr[0]);
         }
 
         /* Watchdog detached: 1 process/container, exits when container dies.

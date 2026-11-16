@@ -98,8 +98,10 @@ void print_usage(const char *prog) {
 		"                  [--net=host|isolated|bridge] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
 		"                  [--read-only] [--seccomp=default|strict|off] [--publish HOST:CONTAINER | -p HOST:CONTAINER]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
+		"       %s logs [-f] [--tail=N] <id> | gc [--dry-run] |\n"
 		"       %s oci-run <bundle> | service create <name> <cmd> [args...] |\n"
-		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] |\n"
+		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] [--require-signature] [--sig=PUBKEY] |\n"
 		"       %s sdk init <dir> [--profile=P] [--ram=32M] | sdk pack <dir> [-o OUT] [--force] |\n"
-		"       --version\n", prog, prog, prog, prog, prog);
+		"       %s check [--json] |\n"
+		"       --version\n", prog, prog, prog, prog, prog, prog, prog);
 }

@@ -306,6 +306,37 @@ static int sdk_pack(int argc, char **argv) {
         fprintf(stderr, "minicontainer: sdk pack: warning: filename must end with %s for `pull` to work\n", PKG_SUFFIX);
         snprintf(prof, sizeof prof, "%s", bn);
     }
+    /* P0.1: stamp arch + write manifest so pull/run can pick the right variant. */
+    char rarch[BUF_SIZE_SMALL];
+    char shp[PATH_MAX + BUF_SIZE_LARGE];
+    snprintf(rarch, sizeof rarch, "%s", MC_ARCH);
+    if (snprintf(shp, sizeof shp, "%s/bin/sh", root) < (int)sizeof shp)
+        elf_arch(shp, rarch, sizeof rarch);
+    char man[PATH_MAX + BUF_SIZE_LARGE];
+    if (snprintf(man, sizeof man, "%s.manifest.json", out) >= (int)sizeof man) {
+        fprintf(stderr, "minicontainer: sdk pack: path too long for manifest\n");
+        return 1;
+    }
+    char ts[BUF_SIZE_SMALL];
+    time_t now = time(NULL);
+    struct tm tmv;
+    gmtime_r(&now, &tmv);
+    strftime(ts, sizeof ts, "%Y-%m-%dT%H:%M:%SZ", &tmv);
+    char mb[PATH_MAX * 2 + BUF_SIZE_LARGE];
+    snprintf(mb, sizeof mb,
+             "{\n  \"name\": \"%s\",\n  \"arch\": \"%s\",\n  \"file\": \"%s\",\n"
+             "  \"sha256\": \"%s\",\n  \"size\": %lld,\n  \"created\": \"%s\"\n}\n",
+             prof, rarch, ob, hash, sz, ts);
+    if (try_write_file(man, mb) < 0)
+        fprintf(stderr, "minicontainer: sdk pack: warning: cannot write %s: %s\n", man, strerror(errno));
+    else
+        printf("     %s\n", man);
+    if (strcmp(rarch, MC_ARCH) != 0)
+        fprintf(stderr,
+                "minicontainer: sdk pack: canh bao: rootfs la %s, may nay la %s\n"
+                "  -> goi y: build/pull ban %s de chay tren may nay\n",
+                rarch, MC_ARCH, MC_ARCH);
+
     char urldir[PATH_MAX + BUF_SIZE_SMALL];
     snprintf(urldir, sizeof urldir, "%s", out);
     char *slash = strrchr(urldir, '/');

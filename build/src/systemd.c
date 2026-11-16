@@ -52,3 +52,31 @@ int do_service_create(int argc, char **argv) {
 	printf("Enable with: systemctl daemon-reload && systemctl enable --now minicontainer-%s.service\n", name);
 	return 0;
 }
+
+/* P0.3: unit + timer so stale state is reconciled even without a cron.
+ * `minicontainer gc` is idempotent and cheap (one /run scan). */
+int do_service_gc(void) {
+	const char *svc =
+		"[Unit]\n"
+		"Description=minicontainer gc (don state/cgroup mo coi)\n\n"
+		"[Service]\n"
+		"Type=oneshot\n"
+		"ExecStart=/usr/local/bin/minicontainer gc\n";
+	const char *timer =
+		"[Unit]\n"
+		"Description=Chay minicontainer gc dinh ky\n\n"
+		"[Timer]\n"
+		"OnBootSec=2min\n"
+		"OnUnitActiveSec=5min\n"
+		"AccuracySec=30s\n\n"
+		"[Install]\n"
+		"WantedBy=timers.target\n";
+	if (try_write_file("/etc/systemd/system/minicontainer-gc.service", svc) < 0 ||
+	    try_write_file("/etc/systemd/system/minicontainer-gc.timer", timer) < 0) {
+		fprintf(stderr, "minicontainer: service gc: cannot write unit files: %s\n", strerror(errno));
+		return 1;
+	}
+	printf("gc service generated at /etc/systemd/system/minicontainer-gc.{service,timer}\n");
+	printf("Enable with: systemctl daemon-reload && systemctl enable --now minicontainer-gc.timer\n");
+	return 0;
+}

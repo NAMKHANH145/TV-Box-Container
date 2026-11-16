@@ -314,6 +314,71 @@ ln -sf ../../etc/passwd $SD/proj/rootfs/escape
 t "sdk pack: tu choi symlink vuot root" sh -c "! $MC sdk pack $SD/proj -o $SD/dist/x-rootfs.tar.gz >/dev/null 2>&1"
 rm -f $SD/proj/rootfs/escape
 t "sdk -> pull -> run (round-trip)" sh -c "$MC pull proj --url=$SD/dist --dest=$SD/round --force >/dev/null 2>&1 && $MC run --rootfs $SD/round /bin/sh -c 'echo ok' | grep -q ok"
+echo "=== P0: check + arch guard + manifest ==="
+t "check: exit 0 tren may du dieu kien" $MC check
+t "check --json: co du muc va exit 0" sh -c "$MC check --json | grep -q '\"cgroup v2\"' && $MC check --json | grep -q '\"arch\"'"
+ARCH=$(uname -m)
+t "sdk pack: manifest co arch dung" sh -c "$MC sdk pack $SD/proj -o $SD/dist/m-rootfs.tar.gz --force >/dev/null && grep -q '\"arch\": \"$ARCH\"' $SD/dist/m-rootfs.tar.gz.manifest.json"
+t "sdk pack: manifest sha256 khop file" sh -c "cd $SD/dist && grep -q \"\$(sha256sum m-rootfs.tar.gz | cut -d' ' -f1)\" m-rootfs.tar.gz.manifest.json"
+P0D=/tmp/mcp0; rm -rf $P0D; mkdir -p $P0D/foreign/bin
+printf '\177ELF' > $P0D/foreign/bin/sh
+dd if=/dev/zero bs=1 count=14 >> $P0D/foreign/bin/sh 2>/dev/null
+if [ "$ARCH" = aarch64 ]; then printf '\076\000' >> $P0D/foreign/bin/sh   # x86_64
+else printf '\267\000' >> $P0D/foreign/bin/sh; fi                          # aarch64
+t "arch guard: rootfs khac arch bi tu choi" sh -c "! $MC run --rootfs $P0D/foreign /bin/sh -c true >/dev/null 2>&1"
+t "arch guard: thong bao ro arch 2 ben" sh -c "$MC run --rootfs $P0D/foreign /bin/sh -c true 2>&1 | grep -q 'rootfs la .* may nay la'"
+rm -rf $P0D
+echo "=== P0.2: logs json-file ==="
+LN=logt$$
+$MC run -d --name=$LN --rootfs $BR /bin/sh -c 'echo o1; echo e1 1>&2' >/dev/null 2>&1
+sleep 1
+t "logs: json-file tach dung stream" sh -c "[ \$(grep -c '\"stream\":\"stdout\"' /run/minicontainer/$LN/logs/container.log) -eq 1 ] && [ \$(grep -c '\"stream\":\"stderr\"' /run/minicontainer/$LN/logs/container.log) -eq 1 ]"
+t "logs: in ra stdout va stderr" sh -c "$MC logs $LN | grep -qx o1 && $MC logs $LN | grep -qx e1"
+t "logs --tail=1 chi in 1 dong" sh -c "[ \$($MC logs --tail=1 $LN | wc -l) -eq 1 ]"
+t "logs: id khong ton tai bi tu choi" sh -c "! $MC logs khongco$$ >/dev/null 2>&1"
+$MC rm -f $LN >/dev/null 2>&1
+LN=logr$$
+$MC run -d --name=$LN --rootfs $BR /bin/sh -c 'i=0; while [ $i -lt 14000 ]; do echo "line $i xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx"; i=$((i+1)); done' >/dev/null 2>&1
+sleep 10
+t "logs: xoay vong tao container.log.1" test -f /run/minicontainer/$LN/logs/container.log.1
+t "logs: file hien tai <= 1 MB sau khi xoay" sh -c "[ \$(stat -c%s /run/minicontainer/$LN/logs/container.log) -le 1048576 ]"
+t "logs --tail=1 sau xoay tra dong cuoi" sh -c "$MC logs --tail=1 $LN | grep -q 'line 13999'"
+t "rm: don sach state + logs" sh -c "$MC rm -f $LN >/dev/null && [ ! -e /run/minicontainer/$LN ]"
+echo "=== P0.3: gc ==="
+t "gc: chay tren may sach" $MC gc
+GN=gcl$$
+$MC run -d --name=$GN --rootfs $BR /bin/sh -c 'sleep 30' >/dev/null 2>&1
+t "gc: khong dung container dang chay" sh -c "$MC gc >/dev/null && [ -d /run/minicontainer/$GN ] && $MC ps | grep -q $GN"
+GCG=$(cat /run/minicontainer/$GN/cgdir 2>/dev/null)
+kill -9 "$(cat /run/minicontainer/$GN/pid)" 2>/dev/null
+sleep 1
+t "gc --dry-run: bao nhung khong xoa" sh -c "$MC gc --dry-run | grep -q $GN && [ -d /run/minicontainer/$GN ]"
+t "gc: don state + cgroup sau kill -9" sh -c "$MC gc >/dev/null && [ ! -e /run/minicontainer/$GN ] && [ ! -d '$GCG' ]"
+echo "=== P0.4: siet extract tar ==="
+EV=/tmp/mcevil; rm -rf $EV; mkdir -p $EV/dev $EV/fifo $EV/sym $EV/src
+mknod $EV/src/null c 1 3 2>/dev/null && tar -czf $EV/dev/base-mini-rootfs.tar.gz -C $EV/src null
+rm -f $EV/src/null
+mkfifo $EV/src/pipe && tar -czf $EV/fifo/base-mini-rootfs.tar.gz -C $EV/src pipe
+rm -f $EV/src/pipe
+ln -s ../../../../etc/passwd $EV/src/escape && tar -czf $EV/sym/base-mini-rootfs.tar.gz -C $EV/src escape
+rm -f $EV/src/escape
+t "pull: tu choi device node" sh -c "! $MC pull base-mini --url=$EV/dev --dest=$EV/out1 >/dev/null 2>&1"
+t "pull: tu choi fifo" sh -c "! $MC pull base-mini --url=$EV/fifo --dest=$EV/out2 >/dev/null 2>&1"
+t "pull: tu choi symlink thoat rootfs" sh -c "! $MC pull base-mini --url=$EV/sym --dest=$EV/out3 >/dev/null 2>&1"
+rm -rf $EV
+echo "=== P0.6: chu ky goi ==="
+FX=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)/tests/fixtures
+SG=/tmp/mcsig; rm -rf $SG; mkdir -p $SG/ok $SG/bad
+cp $FX/signed-rootfs.tar.gz $SG/ok/base-mini-rootfs.tar.gz
+cp $FX/signed-rootfs.tar.gz.sig $SG/ok/base-mini-rootfs.tar.gz.sig
+cp $FX/signed-rootfs.tar.gz $SG/bad/base-mini-rootfs.tar.gz
+cp $FX/signed-rootfs.tar.gz.sig $SG/bad/base-mini-rootfs.tar.gz.sig
+printf x >> $SG/bad/base-mini-rootfs.tar.gz
+t "pull: chu ky hop le duoc chap nhan" sh -c "$MC pull base-mini --url=$SG/ok --dest=$SG/out1 --sig=$FX/test.pub >/dev/null 2>&1"
+t "pull: goi bi sua bi tu choi" sh -c "! $MC pull base-mini --url=$SG/bad --dest=$SG/out2 --sig=$FX/test.pub >/dev/null 2>&1"
+rm -f $SG/ok/base-mini-rootfs.tar.gz.sig
+t "pull: thieu .sig bi tu choi" sh -c "! $MC pull base-mini --url=$SG/ok --dest=$SG/out3 --require-signature --sig=$FX/test.pub >/dev/null 2>&1"
+rm -rf $SG
 rm -rf $SD
 echo "=== leak ==="
 t "mount leak = 0" sh -c "! mount | grep -Fq '$BR/' && ! mount | grep -Fq '$ALP/'"

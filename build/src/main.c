@@ -2,27 +2,7 @@
 #include "common.h"
 #include <sys/prctl.h>
 
-#define VERSION "1.5.4"
-
-#if defined(__aarch64__)
-#define MC_ARCH "aarch64"
-#elif defined(__x86_64__)
-#define MC_ARCH "x86_64"
-#elif defined(__arm__)
-#define MC_ARCH "armv7l"
-#elif defined(__riscv) && defined(__riscv_xlen) && __riscv_xlen == 64
-#define MC_ARCH "riscv64"
-#elif defined(__i386__)
-#define MC_ARCH "i386"
-#else
-#define MC_ARCH "unknown"
-#endif
-
-#ifdef __GLIBC__
-#define MC_LIBC "glibc"
-#else
-#define MC_LIBC "musl"
-#endif
+#define VERSION MC_VERSION
 
 int main(int argc, char **argv) {
     /* Become a subreaper to reap descendant zombies and ensure cgroup cleanup */
@@ -35,6 +15,14 @@ int main(int argc, char **argv) {
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_usage(argv[0]);
         return 0;
+    }
+    if (argc >= 2 && strcmp(argv[1], "check") == 0) {
+        int json = 0;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--json") == 0) json = 1;
+            else { fprintf(stderr, "Usage: %s check [--json]\n", argv[0]); return 1; }
+        }
+        return do_check(json);
     }
     if (argc >= 3 && strcmp(argv[1], "sdk") == 0)
         return do_sdk(argc, argv);
@@ -58,6 +46,26 @@ int main(int argc, char **argv) {
             if (strcmp(argv[i], "--json") == 0) json = 1;
             else { fprintf(stderr, "Usage: %s ps [--json]\n", argv[0]); return 1; }
         return do_ps(json);
+    }
+    if (argc >= 2 && strcmp(argv[1], "gc") == 0) {
+        int dry = 0;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--dry-run") == 0) dry = 1;
+            else { fprintf(stderr, "Usage: %s gc [--dry-run]\n", argv[0]); return 1; }
+        }
+        return do_gc(dry);
+    }
+    if (argc >= 2 && strcmp(argv[1], "logs") == 0) {
+        int follow = 0, tail = 0;
+        const char *id = NULL;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "-f") == 0 || strcmp(argv[i], "--follow") == 0) follow = 1;
+            else if (strncmp(argv[i], "--tail=", 7) == 0) tail = atoi(argv[i] + 7);
+            else if (!id) id = argv[i];
+            else { fprintf(stderr, "Usage: %s logs [-f] [--tail=N] <id>\n", argv[0]); return 1; }
+        }
+        if (!id) { fprintf(stderr, "Usage: %s logs [-f] [--tail=N] <id>\n", argv[0]); return 1; }
+        return do_logs(id, follow, tail);
     }
     if (argc >= 2 && strcmp(argv[1], "stop") == 0) {
         int timeout = 3;
@@ -90,6 +98,8 @@ int main(int argc, char **argv) {
         fprintf(stderr, "Usage: %s exec <id> <cmd> [args...]\n", argv[0]);
         return 1;
     }
+    if (argc >= 3 && strcmp(argv[1], "service") == 0 && strcmp(argv[2], "gc") == 0)
+        return do_service_gc();
     if (argc >= 2 && strcmp(argv[1], "service") == 0 && argc >= 4 && strcmp(argv[2], "create") == 0) {
         return do_service_create(argc, argv);
     }

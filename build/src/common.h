@@ -24,6 +24,30 @@
 #include <linux/seccomp.h>
 
 #define STACK_SIZE (1024 * 1024)
+#define MC_VERSION "1.5.4"
+
+/* Compile-time target arch/libc — used by `--version`, `check`, `sdk pack` and
+ * the rootfs arch guard in run.c. Keep in sync with generate_seccomp.py. */
+#if defined(__aarch64__)
+#define MC_ARCH "aarch64"
+#elif defined(__x86_64__)
+#define MC_ARCH "x86_64"
+#elif defined(__arm__)
+#define MC_ARCH "armv7l"
+#elif defined(__riscv) && defined(__riscv_xlen) && __riscv_xlen == 64
+#define MC_ARCH "riscv64"
+#elif defined(__i386__)
+#define MC_ARCH "i386"
+#else
+#define MC_ARCH "unknown"
+#endif
+
+#ifdef __GLIBC__
+#define MC_LIBC "glibc"
+#else
+#define MC_LIBC "musl"
+#endif
+
 #define CGROUP_BASE "/sys/fs/cgroup"
 #ifndef STATE_BASE
 #define STATE_BASE "/run/minicontainer"
@@ -102,6 +126,8 @@ struct child_arg {
     int go_rd;
     int ready_wr;
     int detach;
+    int out_w;          /* detached: write end of stdout pipe, else -1 */
+    int err_w;          /* detached: write end of stderr pipe, else -1 */
     char cgdir[PATH_MAX];
 };
 
@@ -119,6 +145,10 @@ long parse_bytes(const char *s);
 int try_write_file(const char *path, const char *val);
 void write_file(const char *path, const char *val);
 int read_small(const char *path, char *buf, size_t n);
+/* Read ELF e_machine of a file into out ("aarch64", "x86_64", ...).
+ * Returns 0 on success, -1 if missing/not ELF/unknown arch. */
+int elf_arch(const char *path, char *out, size_t n);
+int do_check(int json);
 void install_filter (void);
 void install_filter_strict(void);
 
@@ -148,8 +178,18 @@ int do_stats(const char *id, int json);
 int do_ps(int json);
 int do_stop(const char *id, int timeout);
 int do_rm(const char *id, int force);
+int do_gc(int dry);
+
+/* P0.6: verify <pkg>.sig (minisign format) against a public key file. */
+int verify_signature(const char *pkg, const char *keypath);
 int do_exec(const char *id, char **cmd);
 int state_relationship_valid(const char *cgdir, int pid);
+
+/* P0.2: json-file log driver (1 object/line, rotate 2 x 1 MB). */
+const char *log_dir_for(const char *statedir, char *out, size_t n);
+int log_logger(int ofd, int efd, const char *dir);
+int do_logs(const char *id, int follow, int tail);
+void log_purge(const char *statedir);
 
 int oci_to_argv(const char *bundle, char **av, int maxav);
 void parse_args(int argc, char **argv, struct cfg *c);
@@ -162,6 +202,7 @@ void validate_input(struct cfg *c);
 void kill_pids_in_cgroup(const char *cgdir, int sig);
 
 int do_service_create(int argc, char **argv);
+int do_service_gc(void);
 
 /* R2-1: userspace disk quota watchdog (kernel has no project quota).
  * disk_usage() sums allocated blocks (du semantics) under path.

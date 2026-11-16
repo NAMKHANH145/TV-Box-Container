@@ -1,5 +1,29 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0b. PLAN_FINAL v2.0 — Phase P0 trên laptop (x86_64) — 2026-11-16
+
+TV Box không có sẵn, nên toàn bộ P0 được test trên laptop Ubuntu (kernel 6.8.0-124, cgroup v2,
+userns bật). Binary test: build glibc x86_64; binary phát hành: musl aarch64 cross-build.
+
+**Kết quả: `build/test.sh` qua `local-test.sh` → PASS=102 FAIL=0 SKIP=6 TONG=108.**
+(6 SKIP là các case phụ thuộc box: T4 OOM do laptop có swap, wording dmesg, 3 case pull
+profile thật thiếu file `web-proxy-rootfs.tar.gz`.)
+
+| Mục | Việc đã làm | Case mới | Bằng chứng |
+|---|---|---|---|
+| P0.1 | `sdk pack` ghi `<out>.manifest.json` (name/arch/file/sha256/size/created), `run` chặn rootfs khác `e_machine` trước khi tạo cgroup | 4 | manifest arch = `uname -m`, sha256 khớp file; rootfs aarch64 trên x86_64 → `rootfs la aarch64, may nay la x86_64`, exit 126 |
+| P0.2 | `log.c`: json-file 1 object/dòng (`log`,`stream`,`time`), logger 1 process/container, xoay 2×1 MB; `logs [-f] [--tail=N]`; `rm` dọn log | 8 | tách đúng stdout/stderr; `--tail` xuyên file xoay; sau 14000 dòng: `.1` = 1.048.635 B, file hiện tại 928.255 B |
+| P0.3 | `gc [--dry-run]` quét state mồ côi + cgroup rác; `service gc` sinh unit/timer systemd (boot + 5 phút) | 4 | `kill -9` container → `gc` xoá state + cgroup; container đang chạy không bị đụng |
+| P0.4 | `pull` đọc tar bằng pipe (không còn cắt ở 64 KB), chặn device/fifo, hardlink/symlink thoát rootfs, trần 200.000 entry / 4 GiB | 3 | tar chứa `crw`, `prw`, symlink `../../../../etc/passwd` đều bị từ chối |
+| P0.5 | `check [--json]`: 10 mục môi trường (arch, kernel, cgroup, userns, overlayfs, xattr, root, iptables, RAM, đĩa) | 2 | exit 0 khi đủ điều kiện, exit 1 + `=> THIEU: root` khi thiếu; JSON parse được |
+| P0.6 | `update.c`: verify chữ ký minisign (Ed25519) qua `openssl pkeyutl`, không nhúng libsodium; `pull --require-signature/--sig=PUBKEY` | 3 | gói hợp lệ → `chu ky hop le`; sửa 1 byte → từ chối; thiếu `.sig` → từ chối |
+
+- Kích thước binary aarch64 musl: **197,5 KB** (trước P0: 169,5 KB → +28,5 KB).
+  Cao hơn ước tính trong PLAN_FINAL (+2..8 KB) vì P0 gánh cả `log.c`, `update.c`, `gc`;
+  dự phóng các phase sau ~+65 KB → ~262 KB, vẫn dưới mốc đỏ 320 KB.
+- Chưa kiểm chứng trên box: OOM thật (laptop có swap), xattr trên ext4/ubifs, hành vi sau
+  reboot/power-cut. Các mục này giữ nguyên trong checklist P0 của plan.
+
 ## 0. Verify v1.5.4 current aarch64 build — 2026-11-12
 
 - Binary deployed: `minicontainer 1.5.4 (aarch64, musl, static)`, 169,496 B.
