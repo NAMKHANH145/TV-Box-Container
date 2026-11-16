@@ -16,6 +16,7 @@ static const struct option run_options[] = {
 	{"seccomp", required_argument, NULL, 's'},
 	{"health-cmd", required_argument, NULL, 'h'},
 	{"rootfs", required_argument, NULL, 'o'},
+	{"image", required_argument, NULL, 'I'},
 	{"net", required_argument, NULL, 'N'},
 	{"hostname", required_argument, NULL, 'H'},
 	{"publish", required_argument, NULL, 'p'},
@@ -47,7 +48,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 	/* Reset getopt */
 	optind = 1;
 
-	while ((opt = getopt_long(argc, argv, "+r:c:i:k:n:dDRs:h:o:N:H:P:p:", run_options, &option_index)) != -1) {
+	while ((opt = getopt_long(argc, argv, "+r:c:i:k:n:dDRs:h:o:I:N:H:P:p:", run_options, &option_index)) != -1) {
 		switch (opt) {
 			case 'r': cf->ram = need_bytes("--ram", optarg); break;
 			case 'c': cf->cpu = (int)need_bytes("--cpu", optarg); break;
@@ -66,6 +67,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 				break;
 			case 'h': cf->health_cmd = optarg; break;
 			case 'o': cf->rootfs = optarg; break;
+			case 'I': cf->image = optarg; break;
 			case 'N': cf->net = optarg; break;
 			case 'H': cf->hostname = optarg; break;
 			case 'p':
@@ -95,7 +97,7 @@ void parse_args(int argc, char **argv, struct cfg *cf) {
 
 void print_usage(const char *prog) {
 	fprintf(stderr, "Usage: %s run [--ram=30M] [--cpu=20] [--pids=64] [--io=1M] [--disk=100M] [--detach|-d] [--name=ID]\n"
-		"                  [--net=host|isolated|bridge] [--rootfs=DIR] [--hostname=NAME] [--health-cmd CMD]\n"
+		"                  [--net=host|isolated|bridge] [--rootfs=DIR | --image=NAME] [--hostname=NAME] [--health-cmd CMD]\n"
 		"                  [--read-only] [--seccomp=default|strict|off] [--publish HOST:CONTAINER | -p HOST:CONTAINER]\n"
 		"       %s ps [--json] | stats <id> [--json] | stop <id> [--timeout N] | rm [-f] <id> | exec <id> <cmd> [args...] |\n"
 		"       %s logs [-f] [--tail=N] <id> | gc [--dry-run] |\n"
@@ -103,5 +105,6 @@ void print_usage(const char *prog) {
 		"       %s pull <profile> [--url=BASE] [--dest=DIR] [--sha256=SUM] [--require-signature] [--sig=PUBKEY] |\n"
 		"       %s sdk init <dir> [--profile=P] [--ram=32M] | sdk pack <dir> [-o OUT] [--force] |\n"
 		"       %s check [--json] |\n"
-		"       --version\n", prog, prog, prog, prog, prog, prog, prog);
+		"       %s load <file.tar> [--tag=NAME] | images [--json] | rmi <name> | save <name> -o <file.tar> |\n"
+		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog);
 }

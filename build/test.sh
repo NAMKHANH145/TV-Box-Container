@@ -4,6 +4,7 @@
 MC=${MC:-minicontainer}
 BR=${BR:-/opt/rootfs}
 ALP=${ALP:-/opt/alpine}
+export MC_IMG_BASE=${MC_IMG_BASE:-/var/lib/minicontainer}
 PASS=0; FAIL=0; SKIP=0
 skip() { local n=${2:-1}; echo "SKIP: $1${n:+ ($n cases)}"; SKIP=$((SKIP+n)); }
 t() { # t <ten> <lenh...>: chay lenh, PASS neu exit 0
@@ -379,6 +380,46 @@ t "pull: goi bi sua bi tu choi" sh -c "! $MC pull base-mini --url=$SG/bad --dest
 rm -f $SG/ok/base-mini-rootfs.tar.gz.sig
 t "pull: thieu .sig bi tu choi" sh -c "! $MC pull base-mini --url=$SG/ok --dest=$SG/out3 --require-signature --sig=$FX/test.pub >/dev/null 2>&1"
 rm -rf $SG
+echo "=== P1: image store (load/images/rmi/save) ==="
+IW=/tmp/mcimg; rm -rf $IW; mkdir -p $IW/src1/dir $IW/src2/dir $IW/arch/blobs/sha256
+echo a > $IW/src1/dir/a.txt
+echo b > $IW/src1/dir/b.txt
+: > $IW/src2/dir/.wh.b.txt          # whiteout: xoa dir/b.txt tu layer truoc
+echo c > $IW/src2/dir/c.txt
+tar -czf $IW/l1.tar.gz -C $IW/src1 .
+tar -czf $IW/l2.tar.gz -C $IW/src2 .
+H1=$(sha256sum $IW/l1.tar.gz | cut -d' ' -f1); H2=$(sha256sum $IW/l2.tar.gz | cut -d' ' -f1)
+cp $IW/l1.tar.gz $IW/arch/blobs/sha256/$H1
+cp $IW/l2.tar.gz $IW/arch/blobs/sha256/$H2
+if [ "$ARCH" = aarch64 ]; then OARCH=arm64; else OARCH=amd64; fi
+printf '{"architecture":"%s","os":"linux","config":{"Cmd":["/bin/sh"],"Env":["PATH=/bin"]},"rootfs":{"type":"layers","diff_ids":[]}}' "$OARCH" > $IW/arch/config.json
+HC=$(sha256sum $IW/arch/config.json | cut -d' ' -f1)
+cp $IW/arch/config.json $IW/arch/blobs/sha256/$HC
+printf '[{"Config":"blobs/sha256/%s","RepoTags":["whiteout-test:1"],"Layers":["blobs/sha256/%s","blobs/sha256/%s"]}]' "$HC" "$H1" "$H2" > $IW/arch/manifest.json
+tar -cf $IW/wh.tar -C $IW/arch .
+t "load: doc docker-save archive" sh -c "$MC load $IW/wh.tar >/dev/null && $MC images | grep -q whiteout-test-1"
+t "load: ap layer + whiteout dung" sh -c "[ -f $MC_IMG_BASE/images/whiteout-test-1/rootfs/dir/a.txt ] && [ -f $MC_IMG_BASE/images/whiteout-test-1/rootfs/dir/c.txt ] && [ ! -e $MC_IMG_BASE/images/whiteout-test-1/rootfs/dir/b.txt ]"
+t "load: config Env/Cmd duoc trich ra" sh -c "grep -q 'PATH=/bin' $MC_IMG_BASE/images/whiteout-test-1/env && tr '\\0' ' ' < $MC_IMG_BASE/images/whiteout-test-1/argv | grep -q '/bin/sh'"
+t "images --json hop le" sh -c "$MC images --json | grep -q '\"name\":\"whiteout-test-1\"'"
+printf 'x' >> $IW/arch/blobs/sha256/$H2
+tar -cf $IW/bad.tar -C $IW/arch .
+t "load: digest sai bi tu choi" sh -c "! $MC load $IW/bad.tar >/dev/null 2>&1"
+t "save -> rmi -> load round-trip" sh -c "$MC save whiteout-test-1 -o $IW/rt.tar >/dev/null && $MC rmi whiteout-test-1 >/dev/null && $MC load $IW/rt.tar >/dev/null && [ -f $MC_IMG_BASE/images/whiteout-test-1/rootfs/dir/a.txt ]"
+$MC rmi whiteout-test-1 >/dev/null 2>&1
+rm -rf $IW
+II=/tmp/mcimg2; rm -rf $II; mkdir -p $II/arch/blobs/sha256
+tar -czf $II/l.tar.gz -C $BR .
+HL=$(sha256sum $II/l.tar.gz | cut -d' ' -f1)
+cp $II/l.tar.gz $II/arch/blobs/sha256/$HL
+printf '{"architecture":"%s","os":"linux","config":{"Cmd":["/bin/sh"],"Env":["PATH=/bin:/sbin"]}}' "$OARCH" > $II/arch/config.json
+HC=$(sha256sum $II/arch/config.json | cut -d' ' -f1)
+cp $II/arch/config.json $II/arch/blobs/sha256/$HC
+printf '[{"Config":"blobs/sha256/%s","RepoTags":["busybox-local:1"],"Layers":["blobs/sha256/%s"]}]' "$HC" "$HL" > $II/arch/manifest.json
+tar -cf $II/img.tar -C $II/arch .
+t "run --image: chay tu image store" sh -c "$MC load $II/img.tar >/dev/null && $MC run --image=busybox-local-1 /bin/sh -c 'echo img-ok' | grep -q img-ok"
+t "run --image: image Env duoc ap dung" sh -c "$MC run --image=busybox-local-1 /bin/sh -c 'echo \$PATH' | grep -q '/bin:/sbin'"
+$MC rmi busybox-local-1 >/dev/null 2>&1
+rm -rf $II
 rm -rf $SD
 echo "=== leak ==="
 t "mount leak = 0" sh -c "! mount | grep -Fq '$BR/' && ! mount | grep -Fq '$ALP/'"

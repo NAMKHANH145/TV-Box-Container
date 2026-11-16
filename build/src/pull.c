@@ -167,53 +167,15 @@ static int scan_verbose(const char *line, void *v) {
     return 0;
 }
 
-/* Stream a tar listing through a pipe: a fixed capture buffer silently
- * truncated large listings before, leaving most members unchecked. */
-static int tar_scan(const char *pkg, int verbose, int (*fn)(const char *, void *), void *ctx) {
-    int fds[2];
-    if (pipe(fds) < 0) return -1;
-    pid_t p = fork();
-    if (p < 0) { close(fds[0]); close(fds[1]); return -1; }
-    if (p == 0) {
-        close(fds[0]);
-        if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(EXIT_CHILD_ERROR);
-        close(fds[1]);
-        char *const av[] = { "/usr/bin/tar", verbose ? "-tvzf" : "-tzf", (char *)pkg, NULL };
-        execv(av[0], av);
-        _exit(EXIT_CHILD_ERROR);
-    }
-    close(fds[1]);
-    FILE *f = fdopen(fds[0], "r");
-    if (!f) { close(fds[0]); kill(p, SIGKILL); waitpid(p, NULL, 0); return -1; }
-    char line[BUF_SIZE_HUGE];
-    int rc = 0;
-    while (fgets(line, sizeof line, f)) {
-        size_t n = strlen(line);
-        if (n && line[n - 1] == '\n') line[--n] = '\0';
-        else if (n == sizeof line - 1) {         /* member name longer than 64 KB */
-            fprintf(stderr, "minicontainer: pull: refuse to extract, member name too long\n");
-            rc = -1;
-            break;
-        }
-        if (fn(line, ctx) < 0) { rc = -1; break; }
-    }
-    if (rc < 0) kill(p, SIGKILL);
-    fclose(f);
-    int st = 0;
-    while (waitpid(p, &st, 0) < 0 && errno == EINTR) {}
-    if (rc == 0 && (!WIFEXITED(st) || WEXITSTATUS(st) != 0)) rc = -1;
-    return rc;
-}
-
 static int check_tar(const char *pkg) {
     struct tar_scan s = { 0, 0 };
-    if (tar_scan(pkg, 0, scan_name, &s) < 0) {
+    if (tar_stream(pkg, 0, scan_name, &s) < 0) {
         fprintf(stderr, "minicontainer: pull: cannot read tar listing\n");
         return -1;
     }
     if (s.entries == 0) { fprintf(stderr, "minicontainer: pull: tar empty\n"); return -1; }
     struct tar_scan v = { 0, 0 };
-    if (tar_scan(pkg, 1, scan_verbose, &v) < 0) {
+    if (tar_stream(pkg, 1, scan_verbose, &v) < 0) {
         fprintf(stderr, "minicontainer: pull: cannot inspect tar members\n");
         return -1;
     }

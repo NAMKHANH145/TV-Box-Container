@@ -1,5 +1,23 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0c. PLAN_FINAL v2.0 — Phase P1 (phần lõi) trên laptop — 2026-11-16
+
+Đã xong: P1.1 (jsmn + parse index/manifest/config + verify digest), P1.2 (áp layer:
+whiteout, opq, mode/uid/gid qua `tar --numeric-owner`, xattr qua `tar --xattrs`), P1.3 một
+phần (store `<base>/images/<name>/rootfs`, chưa overlay/refcount), P1.4 (`load`, `images`,
+`rmi`, `save`), P1.6 (kiểm tra dung lượng trước extract).
+Chưa làm: P1.5 (`mounts[]` OCI), P1.7 (`build`), P1.8 (`export`/`import`).
+
+**Kết quả: PASS=110 FAIL=0 SKIP=6 TONG=116** (thêm 8 case so với P0).
+
+- `docker save alpine:3.19` (OCI layout + manifest.json) → `load` → `alpine-3.19`
+  (`x86_64`, 1 layer) → `run --image=alpine-3.19 /bin/sh -c 'cat /etc/alpine-release'`
+  → `3.19.9`; `PATH` lấy đúng từ config Env; CMD mặc định `/bin/sh` chạy khi không truyền lệnh.
+- Fixture 2 layer tự tạo: layer 2 có `.wh.b.txt` → `dir/b.txt` biến mất, `a.txt`/`c.txt` còn.
+- `save` → `rmi` → `load` → chạy lại: OK (một layer gộp, không byte-identical).
+- Sửa 1 byte trong blob → `load` từ chối (`digest mismatch`).
+- Kích thước binary aarch64 musl: **217,5 KB** (P0: 197,5 KB → +20 KB).
+
 ## 0b. PLAN_FINAL v2.0 — Phase P0 trên laptop (x86_64) — 2026-11-16
 
 TV Box không có sẵn, nên toàn bộ P0 được test trên laptop Ubuntu (kernel 6.8.0-124, cgroup v2,

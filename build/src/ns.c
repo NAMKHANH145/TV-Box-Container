@@ -24,6 +24,9 @@ int child_fn(void *arg) {
      * to 127.0.0.1 will fail. Host uses host's lo, no need to touch. */
     if (strcmp(c->net, "host") != 0) netns_lo_up();
 
+    /* P1: image Env must be applied before chroot (the store lives outside). */
+    if (c->image) img_apply_env(c->image);
+
     /* P0.2: detached run — hand stdout/stderr to the logger's pipes.
      * dup2 clears O_CLOEXEC, so the copies survive execvp; the originals
      * were CLOEXEC and vanish. Done before seccomp so dup2 is never filtered. */

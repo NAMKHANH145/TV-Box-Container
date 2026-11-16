@@ -113,6 +113,7 @@ struct cfg {
     const char *health_cmd;
     const char *name;
     const char *rootfs;
+    const char *image;   /* P1: run from the image store instead of --rootfs */
     const char *net;
     const char *hostname;
     char **cmd;
@@ -182,6 +183,16 @@ int do_gc(int dry);
 
 /* P0.6: verify <pkg>.sig (minisign format) against a public key file. */
 int verify_signature(const char *pkg, const char *keypath);
+
+/* P1: OCI image store (load / images / rmi / run --image). */
+int img_load(const char *file, const char *tag_override);
+int img_rootfs(const char *name, char *out, size_t n);
+int do_images(int json);
+int do_rmi(const char *name);
+int img_save(const char *name, const char *out);
+char **img_argv(const char *name, int *argc_out);
+int img_apply_env(const char *name);
+int layer_apply(const char *blob, const char *rootfs);
 int do_exec(const char *id, char **cmd);
 int state_relationship_valid(const char *cgdir, int pid);
 
@@ -198,6 +209,10 @@ void print_usage(const char *prog);
 int valid_name(const char *s);
 int run_wait(char *const av[]);
 int run_capture(char *const av[], char *out, size_t n);
+/* snprintf into a path buffer; -1 when truncated. */
+int fmt_path(char *out, size_t n, const char *fmt, ...);
+/* Stream `tar -tf`/`-tvf` output through a callback (aborts on <0). */
+int tar_stream(const char *file, int verbose, int (*fn)(const char *, void *), void *ctx);
 void validate_input(struct cfg *c);
 void kill_pids_in_cgroup(const char *cgdir, int sig);
 

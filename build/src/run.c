@@ -183,6 +183,29 @@ static int wait_child(pid_t child, int *status, long disk_limit, long long disk_
 }
 
 int do_run(struct cfg *c) {
+    /* P1: run straight from the image store; --rootfs still wins if both. */
+    static char imgroot[PATH_MAX];
+    if (c->image && !c->rootfs) {
+        if (img_rootfs(c->image, imgroot, sizeof imgroot) < 0) {
+            fprintf(stderr, "minicontainer: khong co image '%s' (dung: images)\n", c->image);
+            return EXIT_SETUP_ERROR;
+        }
+        c->rootfs = imgroot;
+        if (!c->cmd || !c->cmd[0]) {
+            int n = 0;
+            char **av = img_argv(c->image, &n);
+            if (!av || n == 0) {
+                fprintf(stderr, "minicontainer: image '%s' khong co CMD, hay truyen lenh\n", c->image);
+                return EXIT_SETUP_ERROR;
+            }
+            c->cmd = av;
+        }
+    }
+    if (!c->rootfs) {
+        fprintf(stderr, "minicontainer: can --rootfs hoac --image\n");
+        return EXIT_SETUP_ERROR;
+    }
+
     /* P0.1: refuse a rootfs built for another arch before touching cgroups. */
     if (c->rootfs) {
         char rarch[BUF_SIZE_SMALL];

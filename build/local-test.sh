@@ -34,6 +34,6 @@ cp "$SCRIPT_DIR/bomb" "$SCRIPT_DIR/breakout" "$BR/"
 cp "$SCRIPT_DIR/bomb" "$SCRIPT_DIR/breakout" "$ALP/"
 
 MC="$MC" BR="$BR" ALP="$ALP" MC_LOCAL=1 IMG="$ROOT/no-images" \
-    WPDEST="$ROOT/pulled" bash "$SCRIPT_DIR/test.sh"
+    WPDEST="$ROOT/pulled" MC_IMG_BASE="$ROOT/images" bash "$SCRIPT_DIR/test.sh"
 
 rm -rf "$ROOT"

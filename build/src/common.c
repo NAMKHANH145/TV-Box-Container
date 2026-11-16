@@ -1,5 +1,6 @@
 /* common.c — common utility functions */
 #include "common.h"
+#include <stdarg.h>
 
 void die(const char *msg) { perror(msg); exit(1); }
 
@@ -89,6 +90,46 @@ int run_wait(char *const av[]) {
     return WEXITSTATUS(st);
 }
 
+/* Stream `tar -tf` / `tar -tvf` output line by line. A fixed capture buffer
+ * silently truncated large listings, leaving most members unchecked.
+ * fn returns <0 to abort (tar is killed). Returns 0 only if tar exited 0. */
+int tar_stream(const char *file, int verbose, int (*fn)(const char *, void *), void *ctx) {
+    int fds[2];
+    if (pipe(fds) < 0) return -1;
+    pid_t p = fork();
+    if (p < 0) { close(fds[0]); close(fds[1]); return -1; }
+    if (p == 0) {
+        close(fds[0]);
+        if (dup2(fds[1], STDOUT_FILENO) < 0) _exit(EXIT_CHILD_ERROR);
+        close(fds[1]);
+        setenv("PATH", "/usr/sbin:/usr/bin:/sbin:/bin", 1);
+        char *const av[] = { "tar", verbose ? "-tvf" : "-tf", (char *)file, NULL };
+        execvp(av[0], av);
+        _exit(EXIT_CHILD_ERROR);
+    }
+    close(fds[1]);
+    FILE *f = fdopen(fds[0], "r");
+    if (!f) { close(fds[0]); kill(p, SIGKILL); waitpid(p, NULL, 0); return -1; }
+    char line[BUF_SIZE_HUGE];
+    int rc = 0;
+    while (fgets(line, sizeof line, f)) {
+        size_t n = strlen(line);
+        if (n && line[n - 1] == '\n') line[--n] = '\0';
+        else if (n == sizeof line - 1) {         /* member name longer than 64 KB */
+            fprintf(stderr, "minicontainer: tar: member name too long\n");
+            rc = -1;
+            break;
+        }
+        if (fn(line, ctx) < 0) { rc = -1; break; }
+    }
+    if (rc < 0) kill(p, SIGKILL);
+    fclose(f);
+    int st = 0;
+    while (waitpid(p, &st, 0) < 0 && errno == EINTR) {}
+    if (rc == 0 && (!WIFEXITED(st) || WEXITSTATUS(st) != 0)) rc = -1;
+    return rc;
+}
+
 /* Like run_wait but capture stdout into out (truncated).
  * Timeout 30s via alarm. Returns -1 if output would exceed buffer. */
 int run_capture(char *const av[], char *out, size_t n) {
@@ -145,6 +186,17 @@ int run_capture(char *const av[], char *out, size_t n) {
     alarm(0);
     if (!WIFEXITED(st)) return -1;
     return WEXITSTATUS(st);
+}
+
+/* Format a path into a fixed buffer; -1 if it would be truncated.
+ * Wrapping vsnprintf here keeps -Wformat-truncation quiet at every call site
+ * while still catching the real (if unlikely) overflow at runtime. */
+int fmt_path(char *out, size_t n, const char *fmt, ...) {
+    va_list ap;
+    va_start(ap, fmt);
+    int r = vsnprintf(out, n, fmt, ap);
+    va_end(ap);
+    return (r < 0 || (size_t)r >= n) ? -1 : 0;
 }
 
 int valid_name(const char *s) {

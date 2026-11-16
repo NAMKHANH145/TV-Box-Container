@@ -47,6 +47,42 @@ int main(int argc, char **argv) {
             else { fprintf(stderr, "Usage: %s ps [--json]\n", argv[0]); return 1; }
         return do_ps(json);
     }
+    if (argc >= 2 && strcmp(argv[1], "images") == 0) {
+        int json = 0;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--json") == 0) json = 1;
+            else { fprintf(stderr, "Usage: %s images [--json]\n", argv[0]); return 1; }
+        }
+        return do_images(json);
+    }
+    if (argc >= 2 && strcmp(argv[1], "load") == 0) {
+        const char *file = NULL, *tag = NULL;
+        for (int i = 2; i < argc; i++) {
+            if (strncmp(argv[i], "--tag=", 6) == 0) tag = argv[i] + 6;
+            else if (strcmp(argv[i], "--tag") == 0 && i + 1 < argc) tag = argv[++i];
+            else if (!file) file = argv[i];
+            else { fprintf(stderr, "Usage: %s load <file.tar> [--tag=NAME]\n", argv[0]); return 1; }
+        }
+        if (!file) { fprintf(stderr, "Usage: %s load <file.tar> [--tag=NAME]\n", argv[0]); return 1; }
+        return img_load(file, tag);
+    }
+    if (argc >= 3 && strcmp(argv[1], "save") == 0) {
+        const char *out = NULL;
+        for (int i = 3; i < argc; i++) {
+            if (strncmp(argv[i], "-o", 2) == 0) {
+                if (argv[i][2]) out = argv[i] + 2;
+                else if (i + 1 < argc) out = argv[++i];
+            } else if (strncmp(argv[i], "--output=", 9) == 0) out = argv[i] + 9;
+        }
+        if (!out) { fprintf(stderr, "Usage: %s save <name> -o <file.tar>\n", argv[0]); return 1; }
+        return img_save(argv[2], out);
+    }
+    if (argc == 3 && strcmp(argv[1], "rmi") == 0)
+        return do_rmi(argv[2]);
+    if (argc == 2 && strcmp(argv[1], "rmi") == 0) {
+        fprintf(stderr, "Usage: %s rmi <name>\n", argv[0]);
+        return 1;
+    }
     if (argc >= 2 && strcmp(argv[1], "gc") == 0) {
         int dry = 0;
         for (int i = 2; i < argc; i++) {
@@ -110,11 +146,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     struct cfg c = { .ram = -1, .cpu = -1, .pids = 64, .io = -1, .max_disk = -1, .detach = 0, .name = NULL,
-                     .rootfs = "/opt/rootfs",
+                     .rootfs = NULL, .image = NULL,
                      .net = "host", .hostname = "minicontainer-os", .cmd = NULL };
     parse_args(argc, argv, &c);
+    if (!c.rootfs && !c.image) c.rootfs = "/opt/rootfs";
     validate_input(&c);
-    if (!c.cmd || !c.cmd[0]) {
+    if ((!c.cmd || !c.cmd[0]) && !c.image) {
         print_usage(argv[0]);
         return 1;
     }
