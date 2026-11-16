@@ -54,7 +54,7 @@ jobs:
               export DEBIAN_FRONTEND=noninteractive
               apt-get update -qq >/dev/null
               apt-get install -y -qq busybox-static iproute2 iptables iputils-ping \
-                procps curl ca-certificates zstd gcc make libc6-dev >/dev/null
+                procps curl ca-certificates zstd gcc make libc6-dev python3 file >/dev/null
               mkdir -p /sys/fs/cgroup/mc-host
               for p in $(cat /sys/fs/cgroup/cgroup.procs); do
                 echo $p > /sys/fs/cgroup/mc-host/cgroup.procs 2>/dev/null || true
@@ -66,14 +66,22 @@ jobs:
               bash local-test.sh 2>&1 | tee /out/test.log
             '
 
-  # Kiem tra tren phan cung that (TV Box S905W), khong the chay tren runner GitHub.
+  # Kiem tra tren phan cung that (TV Box S905W) qua self-hosted runner. Mac dinh TAT de
+  # run tren GitHub-hosted luon xanh; bat bang repo variable MC_HARDWARE_TESTS=true khi
+  # runner aarch64 online va da `install -m755 minicontainer /usr/local/bin/` tren box.
   hardware-test:
     runs-on: [self-hosted, linux, aarch64]
-    if: github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
+    if: >-
+      vars.MC_HARDWARE_TESTS == 'true' && github.event_name == 'push' &&
+      (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/tags/'))
     steps:
       - uses: actions/checkout@v4
       - name: Chay test.sh tren TV Box (full matrix)
-        run: bash build/test.sh
+        run: |
+          export PATH=/usr/local/bin:$PATH
+          command -v minicontainer || { echo "cai minicontainer vao /usr/local/bin tren runner truoc"; exit 1; }
+          minicontainer --version
+          bash build/test.sh
 
   build:
     runs-on: ubuntu-24.04
