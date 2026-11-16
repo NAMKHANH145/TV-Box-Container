@@ -601,6 +601,7 @@ int do_stop(const char *id, int timeout) {
     if (wd > 1) kill(wd, SIGTERM);
     snprintf(f, sizeof f, "%s/watchdog", dir);
     unlink(f);
+    journal_event("container stop id=%s", id);
     return 0;
 }
 
@@ -701,6 +702,7 @@ int do_rm(const char *id, int force) {
     snprintf(f, sizeof f, "%s/health_failed", dir); unlink(f);
     log_purge(dir);
     rmdir(dir);
+    journal_event("container remove id=%s", id);
     printf("%s: removed\n", id);
     return 0;
 }

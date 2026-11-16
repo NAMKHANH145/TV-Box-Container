@@ -520,11 +520,13 @@ int do_run(struct cfg *c) {
             }
         }
 
+        journal_event("container start id=%s pid=%d", id, (int)child);
         printf("%s\n", id);
         free(stack);
         return 0;
     }
 
+    journal_event("container start pid=%d", (int)child);
     int status = 0;
     int disk_killed = wait_child(child, &status, disk_limit, disk_base,
                                  c->rootfs, cgdir, c->health_cmd);
@@ -536,6 +538,8 @@ int do_run(struct cfg *c) {
     if (g_stop_sig) cgroup_kill(cgdir);
     cgroup_cleanup(c, cgdir);
     if (have_bc) bridge_teardown(child, c->publish, c->npublish);
+    journal_event("container exit pid=%d status=%d", (int)child,
+                  WIFEXITED(status) ? WEXITSTATUS(status) : -1);
     free(stack);
     if (g_stop_sig) return EXIT_SIGNAL_BASE + g_stop_sig;
     if (disk_killed) return EXIT_SIGNAL_BASE + SIGKILL;

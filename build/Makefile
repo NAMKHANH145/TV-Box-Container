@@ -7,7 +7,7 @@ ifeq ($(origin CC),default)
 CC := $(TOOLCHAIN)gcc
 endif
 STRIP ?= $(TOOLCHAIN)strip
-CFLAGS ?= -static -O2 -Wall
+CFLAGS ?= -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections
 SRC = $(filter-out src/seccomp_strict_%.c,$(wildcard src/*.c))
 OUT = minicontainer
 

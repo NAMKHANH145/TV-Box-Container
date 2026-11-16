@@ -1,5 +1,40 @@
 # VERIFICATION_LOG — Kiểm tra TV Box S905W
 
+## 0g. PLAN_FINAL v2.0 — Phase P4 (update A/B, watchdog, metrics, compose-lite) trên laptop — 2026-11-16
+
+Đã xong P4.1–P4.6. Không có box, nên các phép đo dưới đây là x86_64; binary aarch64 chỉ
+cross-build, **chưa thực thi**. Boot lại 5 lần và watchdog phần cứng thật vẫn chờ box.
+
+**Kết quả: PASS=176 FAIL=0 SKIP=7 TONG=183** — `build/local-test.sh`, binary x86_64 glibc static
+`-Os -ffunction-sections -fdata-sections -Wl,--gc-sections` (sha256
+`18e35a30df7260a5905f6048f4310ba1c4179b6a3e3e6ed5f8cecefe3040b56b`), trong container Ubuntu
+24.04 privileged, kernel host `6.8.0-124-generic`, cgroup v2. Cgroup root của container được dời
+process vào `mc-host` trước khi chạy để bật `cpu/memory/pids/io`.
+
+| Mục | Case đã xanh |
+|---|---|
+| P4.1 A/B | apply → slot A + `--link` trỏ `base/current/rootfs`; apply lần 2 → slot B + `previous=A`; apply 3 vòng A/B liên tiếp không hỏng; không còn `.stage-*` |
+| P4.1 rollback | `--health-cmd=false` bị từ chối **trước khi ghi slot** (current vẫn B, link vẫn v2); `update rollback` B→A đưa link về v1 |
+| P4.1 an toàn gói | rootfs khác arch bị từ chối; tar có member `../` bị từ chối |
+| P4.2 chữ ký | `--verify=KEY` trên gói không có `.sig` bị từ chối (đường verify minisign dùng chung với `pull`/`import`, hai đường đó có case chữ ký hợp lệ) |
+| P4.3 watchdog | `watchdog --device=FILE --timeout=1 --pid=SLEEP` ghi feed và tự dừng khi PID chết |
+| P4.4 metrics | file Prometheus có `minicontainer_up{id}=1`, `memory_bytes`, `pids`, `cpu_seconds_total`, `info{version,arch}`; `--stdout` không ghi file |
+| P4.5 compose | YAML subset 3 service, `up` cả 3, `ps` thấy đủ, `down` xoá sạch state |
+| P4.6 delta | `update diff` tạo patch zstd, patch nhỏ hơn file mới, `update patch` khôi phục byte-for-byte (`cmp`) |
+
+- 7 SKIP như P3: T4 memory-cgroup, T4 dmesg, Tio, 3 case web-proxy fixture, P3.8 emulate.
+- Kích thước aarch64 musl mặc định mới (`-Os`, strip, gc-sections): **280.112 B (273,5 KiB)**, 0
+  warning; sha256 `2bf93ab851c156a70ef534356db9f7f5fc6cde05a96e5196b9c4cd6c39a0a923`. Nhờ `-Os` +
+  `--gc-sections`, P4 (+~20 KB code) vẫn dưới trần CI 300 KB (P3 `-O2` là 292.416 B).
+- Health-check chạy trên **staging trước khi ghi slot**: nếu flip trước rồi rollback thì slot B
+  (bản tốt cuối) đã bị ghi đè, không còn fallback. Đây là lý do thứ tự trong `update.c` khác bản
+  nháp đầu.
+- Compose-lite dùng **YAML subset** (services/image/rootfs/command/ports/environment/volumes/
+  network/restart/memory/cpus). Test dùng `network: host`; compose qua bridge chưa có case riêng.
+- **Chưa chạy**: `/dev/watchdog` thật + reset khi treo; journald socket thật (hàm gửi best-effort,
+  không có journald trong container); gói update **có chữ ký hợp lệ** (chỉ test từ chối gói thiếu
+  chữ ký); reboot 5 lần sạch; compose 3 service qua bridge; và toàn bộ suite trên S905W.
+
 ## 0f. PLAN_FINAL v2.0 — Phase P3 (runtime-spec + CLI parity) trên laptop — 2026-11-16
 
 Đã xong P3.1–P3.7 và P3.9–P3.12. P3.8 (`--emulate`) có code nhưng **chưa chạy** trong phiên này

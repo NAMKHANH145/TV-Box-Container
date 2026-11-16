@@ -288,6 +288,14 @@ dòng) + state/config/cp/init. p50 chưa đo trên box; T7 local chỉ là asser
 | P4.6 | Delta update (`zstd --patch-from`) | 150 | bản vá nhỏ hơn 10–50× |
 
 **Gate P4:** update/rollback 3 lần liên tiếp không hỏng; reboot 5 lần sạch; 84/84.
+Đo thực tế 2026-11-16 (x86_64, Ubuntu 24.04 privileged container, kernel 6.8.0-124-generic):
+`build/local-test.sh` → **176 PASS / 0 FAIL / 7 SKIP (TONG=183)**, build `-Os` + gc-sections.
+P4.1 có 3 vòng A/B liên tiếp, health fail trước khi ghi slot (giữ nguyên bản đang chạy), rollback
+B→A, từ chối rootfs khác arch và tar có `../`; P4.2 từ chối gói thiếu chữ ký; P4.3 watchdog trên
+file giả lập; P4.4 metrics đủ 5 dòng Prometheus; P4.5 compose 3 service host-net; P4.6 patch zstd
+nhỏ hơn file mới và khôi phục byte-for-byte. aarch64 musl: **280.112 B (273,5 KiB)**, 0 warning,
+sha256 `2bf93ab8…`. **Chưa đạt gate đầy đủ**: reboot 5 lần, `/dev/watchdog` thật, journald thật,
+gói update có chữ ký hợp lệ, và compose qua bridge — chờ box/thiết bị thật.
 
 ### P5 — Mở rộng (chỉ làm nếu còn thời gian)
 

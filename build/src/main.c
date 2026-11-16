@@ -4,13 +4,32 @@
 
 #define VERSION MC_VERSION
 
+static int print_version(int json) {
+    if (json)
+        printf("{\"version\":\"%s\",\"arch\":\"%s\",\"libc\":\"%s\",\"static\":true,"
+               "\"features\":[\"namespaces\",\"cgroup-v2\",\"seccomp\",\"bridge\","
+               "\"registry-pull\",\"compose\",\"ab-update\",\"metrics\",\"watchdog\"]}\n",
+               VERSION, MC_ARCH, MC_LIBC);
+    else
+        printf("minicontainer %s (%s, %s, static)\n", VERSION, MC_ARCH, MC_LIBC);
+    return 0;
+}
+
 int main(int argc, char **argv) {
     /* Become a subreaper to reap descendant zombies and ensure cgroup cleanup */
     prctl(PR_SET_CHILD_SUBREAPER, 1);
 
     if (argc >= 2 && strcmp(argv[1], "--version") == 0) {
-        printf("minicontainer %s (%s, %s, static)\n", VERSION, MC_ARCH, MC_LIBC);
-        return 0;
+        int json = argc >= 3 && strcmp(argv[2], "--json") == 0;
+        return print_version(json);
+    }
+    if (argc >= 2 && strcmp(argv[1], "version") == 0) {
+        int json = 0;
+        for (int i = 2; i < argc; i++) {
+            if (strcmp(argv[i], "--json") == 0) json = 1;
+            else { fprintf(stderr, "Usage: %s version [--json]\n", argv[0]); return 1; }
+        }
+        return print_version(json);
     }
     if (argc >= 2 && (strcmp(argv[1], "--help") == 0 || strcmp(argv[1], "-h") == 0)) {
         print_usage(argv[0]);
@@ -23,6 +42,13 @@ int main(int argc, char **argv) {
             else { fprintf(stderr, "Usage: %s check [--json]\n", argv[0]); return 1; }
         }
         return do_check(json);
+    }
+    if (argc >= 3 && (strcmp(argv[1], "update") == 0 || strcmp(argv[1], "watchdog") == 0 ||
+                      strcmp(argv[1], "metrics") == 0 || strcmp(argv[1], "compose") == 0)) {
+        if (strcmp(argv[1], "update") == 0) return do_update_cli(argc, argv);
+        if (strcmp(argv[1], "watchdog") == 0) return do_watchdog(argc, argv);
+        if (strcmp(argv[1], "metrics") == 0) return do_metrics(argc, argv);
+        return do_compose(argc, argv);
     }
     if (argc >= 3 && strcmp(argv[1], "sdk") == 0)
         return do_sdk(argc, argv);

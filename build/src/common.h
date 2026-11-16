@@ -209,6 +209,13 @@ int do_gc(int dry);
 int do_inspect(const char *id, int json);
 int do_start(const char *id);
 int do_cp(const char *src, const char *dst);
+
+/* P4: A/B rootfs update + rollback + delta, watchdog, metrics, compose-lite. */
+int do_update_cli(int argc, char **argv);
+int do_watchdog(int argc, char **argv);
+int do_metrics(int argc, char **argv);
+int do_compose(int argc, char **argv);
+void journal_event(const char *fmt, ...);
 int state_save_run_config(const char *dir, const struct cfg *c);
 int state_open_pid(const char *id, pid_t *pid, char *dir, size_t dirn);
 

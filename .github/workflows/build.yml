@@ -20,7 +20,7 @@ jobs:
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
             muslcc/x86_64:x86_64-linux-musl \
-            sh -c 'rm -f minicontainer && gcc -static -O2 -Wall -o minicontainer src/*.c && strip -s minicontainer'
+            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer src/*.c && strip -s minicontainer'
           stat -c '%n %s bytes' build/minicontainer
       - name: sdk init/pack (11 check, khong can root)
         run: bash build/smoke-sdk.sh
@@ -61,7 +61,7 @@ jobs:
         run: |
           docker run --rm -v "$GITHUB_WORKSPACE":/io -w /io/build \
             muslcc/x86_64:${{ matrix.musl }} \
-            sh -c 'rm -f minicontainer && gcc -static -O2 -Wall -o minicontainer src/*.c && strip -s minicontainer'
+            sh -c 'rm -f minicontainer && gcc -static -Os -Wall -ffunction-sections -fdata-sections -Wl,--gc-sections -o minicontainer src/*.c && strip -s minicontainer'
           stat -c '%n %s bytes' build/minicontainer
 
       - name: Check binary is static and not bloated

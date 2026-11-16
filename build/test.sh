@@ -527,6 +527,72 @@ t "P3.6 seccomp JSON tu choi mount" $MC run --rootfs $BR --seccomp=$SJ /bin/sh -
 t "P3.6 seccomp JSON cho phep syscall khac" sh -c "$MC run --rootfs $BR --seccomp=$SJ /bin/sh -c 'echo sjson' | grep -qx sjson"
 rm -f $SJ
 skip "P3.8 --emulate (can qemu-user-static + rootfs ngoai arch)"
+echo "=== P4: A/B update + rollback + delta ==="
+UP=/tmp/mcupd$$; rm -rf $UP; mkdir -p $UP/p1/rootfs $UP/p2/rootfs $UP/p3/rootfs
+cp -a $BR/. $UP/p1/rootfs/; cp -a $BR/. $UP/p2/rootfs/; cp -a $BR/. $UP/p3/rootfs/
+printf 'v1\n' > $UP/p1/rootfs/etc/mc-update-version
+printf 'v2\n' > $UP/p2/rootfs/etc/mc-update-version
+printf 'v3-bad\n' > $UP/p3/rootfs/etc/mc-update-version
+for n in 1 2 3; do
+  printf '{"arch":"%s","version":"%s"}\n' "$(uname -m)" "$n" > $UP/p$n/manifest.json
+  tar -czf $UP/p$n.tgz -C $UP/p$n .
+done
+UB=$UP/base
+t "P4.1 update: slot A + link" sh -c "$MC update apply $UP/p1.tgz --base=$UB --link=$UP/rootfs >/dev/null && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v1 ] && [ \"\$(readlink $UB/current)\" = slots/A ]"
+t "P4.1 update: slot B + previous=A" sh -c "$MC update apply $UP/p2.tgz --base=$UB >/dev/null && [ \"\$(readlink $UB/current)\" = slots/B ] && [ \"\$(cat $UB/previous)\" = A ] && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v2 ]"
+t "P4.4 status --json bao slot B" sh -c "$MC update status --base=$UB --json | grep -q '\"current\":\"B\"'"
+t "P4.2 update: goi khong chu ky bi tu choi" sh -c "! $MC update apply $UP/p1.tgz --base=$UB --verify=$FX/test.pub >/dev/null 2>&1"
+t "P4.1 update: health fail tu rollback" sh -c "! $MC update apply $UP/p3.tgz --base=$UB --health-cmd=false >/dev/null 2>&1 && [ \"\$(readlink $UB/current)\" = slots/B ] && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v2 ]"
+t "P4.1 update: rollback B -> A" sh -c "$MC update rollback --base=$UB >/dev/null && [ \"\$(readlink $UB/current)\" = slots/A ] && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v1 ]"
+t "P4.1 update: 3 vong A/B lien tiep" sh -c "$MC update apply $UP/p2.tgz --base=$UB >/dev/null && $MC update apply $UP/p1.tgz --base=$UB >/dev/null && $MC update apply $UP/p2.tgz --base=$UB >/dev/null && [ \"\$(readlink $UB/current)\" = slots/B ] && [ \"\$(cat $UP/rootfs/etc/mc-update-version)\" = v2 ]"
+t "P4.1 update: khong de stage rac" sh -c "! ls -d $UB/.stage-* >/dev/null 2>&1"
+mkdir -p $UP/bad/rootfs/bin
+printf '\177ELF' > $UP/bad/rootfs/bin/sh
+dd if=/dev/zero bs=1 count=14 >> $UP/bad/rootfs/bin/sh 2>/dev/null
+if [ "$(uname -m)" = aarch64 ]; then printf '\076\000' >> $UP/bad/rootfs/bin/sh; else printf '\267\000' >> $UP/bad/rootfs/bin/sh; fi
+tar -czf $UP/bad.tgz -C $UP/bad .
+t "P4.1 update: rootfs khac arch bi tu choi" sh -c "! $MC update apply $UP/bad.tgz --base=$UB >/dev/null 2>&1"
+t "P4.1 update: package co .. bi tu choi" sh -c "mkdir -p $UP/evil && echo x > $UP/evil/x && tar -czf $UP/evil.tgz -C $UP/evil --transform='s|^|../|' . && ! $MC update apply $UP/evil.tgz --base=$UB >/dev/null 2>&1"
+if command -v zstd >/dev/null 2>&1; then
+  dd if=/dev/urandom of=$UP/old.bin bs=1M count=1 2>/dev/null
+  cp $UP/old.bin $UP/new.bin; printf 'delta-tail\n' >> $UP/new.bin
+  t "P4.6 delta: tao patch zstd" $MC update diff $UP/old.bin $UP/new.bin -o $UP/delta.zst
+  t "P4.6 delta: patch nho hon file moi" sh -c "[ \$(stat -c%s $UP/delta.zst) -lt \$(stat -c%s $UP/new.bin) ]"
+  t "P4.6 delta: ap patch khoi phuc byte-for-byte" sh -c "$MC update patch $UP/old.bin $UP/delta.zst -o $UP/restored.bin >/dev/null && cmp $UP/new.bin $UP/restored.bin"
+else
+  skip "P4.6 delta (khong co zstd)" 3
+fi
+echo "=== P4: watchdog + metrics + compose ==="
+WD=$UP/watchdog; ( sleep 2 & echo $! > $UP/wdpid; wait ) &
+WT=0; while [ ! -s $UP/wdpid ] && [ $WT -lt 20 ]; do sleep 0.1; WT=$((WT+1)); done
+t "P4.3 watchdog feed va dung khi PID thoat" timeout 10 $MC watchdog --device=$WD --timeout=1 --pid=$(cat $UP/wdpid 2>/dev/null || echo 0)
+ME=metrics$$; $MC run -d --name $ME --rootfs $BR /bin/sleep 30 >/dev/null 2>&1
+sleep 1
+$MC metrics --dir=$UP/metrics >/dev/null 2>&1
+MVER=$($MC --version | cut -d' ' -f2)
+t "P4.4 metrics: up + memory cho container" sh -c "grep -q 'minicontainer_up{id=\"$ME\"} 1' $UP/metrics/minicontainer.prom && grep -q 'minicontainer_memory_bytes{id=\"$ME\"}' $UP/metrics/minicontainer.prom"
+t "P4.4 metrics: info version/arch" grep -q "minicontainer_info{version=\"$MVER\",arch=\"" $UP/metrics/minicontainer.prom
+$MC stop $ME >/dev/null 2>&1; $MC rm $ME >/dev/null 2>&1
+t "P4.4 metrics: --stdout khong ghi file" sh -c "$MC metrics --stdout | grep -q 'minicontainer_info'"
+CS=compose$$; cat > $UP/compose.yml <<EOF
+services:
+  c${CS}a:
+    rootfs: $BR
+    command: ["/bin/sleep", "30"]
+    network: host
+  c${CS}b:
+    rootfs: $BR
+    command: ["/bin/sleep", "30"]
+    network: host
+  c${CS}c:
+    rootfs: $BR
+    command: ["/bin/sleep", "30"]
+    network: host
+EOF
+t "P4.5 compose: up 3 service" sh -c "$MC compose -f $UP/compose.yml up >/dev/null && $MC ps | grep -q c${CS}a && $MC ps | grep -q c${CS}b && $MC ps | grep -q c${CS}c"
+t "P4.5 compose: ps liet ke du" sh -c "$MC compose -f $UP/compose.yml ps | grep -q c${CS}a"
+t "P4.5 compose: down don sach" sh -c "$MC compose -f $UP/compose.yml down >/dev/null && ! $MC ps | grep -q c${CS}a && ! $MC ps | grep -q c${CS}b && ! $MC ps | grep -q c${CS}c"
+rm -rf $UP
 echo "=== leak ==="
 t "mount leak = 0" sh -c "! mount | grep -Fq '$BR/' && ! mount | grep -Fq '$ALP/'"
 echo "=== T7 latency (assert <500ms) ==="
