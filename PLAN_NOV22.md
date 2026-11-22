@@ -108,3 +108,116 @@ V1 duoc nang cap theo yeu cau "1 bundle, tu nhan dien arch dich":
   harness → noise moi lan `run`).
 - 2 test moi trong `build/test.sh`: `multi export: bundle co 2 bien the`,
   `multi import: tu chon arch may nay`. Tong case 185 → 187.
+
+---
+
+# Đề xuất v2.1.0 — `export` tự chuẩn hóa sang kiến trúc đích
+
+## 1. Vấn đề cần giải quyết
+
+Hiện `export --arch=x86_64 image-arm -o out.tar.gz` chỉ ghi nhãn `preferred` vào `multiarch.json`;
+muốn có biến thể x86 thì vẫn phải `pull --platform=linux/amd64` + `build` riêng trên box. Người dùng
+muốn: **box chỉ build đúng bản native của nó, rồi đúng 1 lệnh export tự tạo ra bản của kiến trúc đích
+và đóng gói**.
+
+## 2. Nguyên tắc thiết kế (tránh "tạo vỏ mới để ship dễ hơn")
+
+Không làm những cách này:
+
+- không chạy một container/runtime khác để "giả lập rồi đóng gói lại" (đó là QEMU, đã loại);
+- không bắt người dùng gõ thêm `pull`, `build`, `tag`, `save` — mọi thứ nằm trong **1 lệnh `export`**;
+- không ghi đè image nguồn trong store; không dùng image tạm kiểu `mc-multi-*` như bản v2.0.1.
+
+Cách làm: **chỉnh chính lớp vỏ của image nguồn**.
+
+```
+image nguồn = base(rootfs hệ + runtime)  +  delta(app do COPY/RUN tạo ra)
+export --arch=T  =>  base_T (cùng ref, kiến trúc T)  +  delta(y hệt)  =>  variant_T
+```
+
+`delta` là dữ liệu thuần của ứng dụng (source Python, config, script, asset). Nó không chứa mã máy,
+nên ghép được lên base của bất kỳ kiến trúc nào. Trường hợp `delta` có ELF native → **từ chối**,
+không âm thầm đóng gói bản sai. Đây là "chuyển hóa lớp vỏ khéo léo hơn": đổi nền, giữ nguyên app.
+
+## 3. Cú pháp (một lệnh duy nhất)
+
+```bash
+minicontainer export --arch=x86_64 [--base=python:3.12-alpine] weather-arm-1 -o weather-multi.tar.gz
+```
+
+- `--arch=T` (bắt buộc muốn normalize): kiến trúc đích. Nếu bằng arch nguồn → export thường.
+- `--base=REF`: chỉ cần khi image không có provenance (xem mục 5).
+- Output vẫn là **1 bundle** chứa `multiarch.json` + biến thể native + biến thể vừa normalize.
+
+## 4. Dữ liệu provenance cần có
+
+Thêm vào `meta` của image ngay lúc `build` (`src/build.c`, khi gặp `FROM`):
+
+```
+base=python:3.12-alpine
+arch=aarch64
+```
+
+Và lưu **delta** ngay lúc build — đây là chỗ "khéo léo": build đã có rootfs của base trước khi áp
+`COPY`/`RUN`, nên có thể ghi lại danh sách path mới/sửa/xoá sau mỗi directive:
+
+```
+<store>/images/<name>/delta     # dòng: "A <path>" / "M <path>" / "D <path>"
+```
+
+Không cần snapshot cả rootfs base (~50 MB/image). Khi export chỉ cần đọc `delta`, copy đúng các
+path `A`/`M` từ rootfs nguồn sang base đích, xoá các path `D`.
+
+## 5. Các trường hợp và cách xử lý
+
+| Trường hợp | Hành động của export |
+|---|---|
+| COPY-only, có `base=` | tải base đích (nếu chưa có), áp delta, đóng gói variant_T → **OK** |
+| Có `RUN` cài mã native (v2: Pillow `.so` aarch64) | quét ELF trong delta, gặp `e_machine != T` → lỗi rõ: `cannot normalize: <path> chua ELF aarch64 (can x86_64)` |
+| Image load tay, không có `base=` và không truyền `--base` | lỗi rõ: `export: can not normalize without base; add --base=REF` |
+| Image load tay, có `--base=REF` | dùng REF làm base đích, tiếp tục như COPY-only |
+| `--arch` = arch nguồn | export bình thường, không normalize |
+| Không có `--arch` | export giữ nguyên hành vi v2.0.1 (`-o FILE`, 1 arch) |
+
+## 6. Bảo vệ ELF (bắt buộc, không được bỏ)
+
+Đọc 20 byte đầu mỗi file trong delta:
+
+- `0x7f ELF`, `e_machine` ở offset 18 (little-endian trên cả 2 arch đề xuất).
+- Bản đồ: `62 = x86_64`, `183 = aarch64`, `40 = armv7l`, `243 = riscv64`.
+- Khác arch đích → abort với message nêu rõ file và mã máy. Không fallback sang qemu.
+
+Ngoài ELF, bỏ qua script/shebang — Python/source/config là arch-neutral.
+
+## 7. Việc cần làm
+
+| Việc | File |
+|---|---|
+| Ghi `base=` + file `delta` lúc build | `src/build.c` |
+| Normalize trong export: đọc meta/delta, tải base đích, áp delta, guard ELF, ghi vào bundle | `src/multiarch.c` |
+| `--base=` parsing, usage | `src/main.c`, `src/cli.c`, `src/common.h` |
+| Test: COPY-only normalize OK; Pillow native bị từ chối; thiếu base bị từ chối; `--base` cứu được | `build/test.sh` |
+| Demo v1: bỏ `pull --platform=linux/amd64` ở A4, chỉ còn 1 lệnh `export --arch=x86_64 ...` | `demo-cross-ship/demo-cross-ship.sh` + README |
+| Docs/log | `README.md`, `progress/VERIFICATION_LOG.md` |
+
+## 8. Tiêu chí xong
+
+Trên box (chỉ có bản aarch64):
+
+```bash
+minicontainer pull --platform=linux/arm64 python:3.12-alpine
+minicontainer build --no-cache --platform=linux/arm64 -t weather-arm:1 /root/demo-mc/app-box
+minicontainer export --arch=x86_64 weather-arm-1 -o weather-multi.tar.gz
+```
+
+Laptop `import weather-multi.tar.gz` → in `chon bien the x86_64` → chạy native, cùng kết quả thời
+tiết. Và với `app-arm` (Pillow): export phải **fail với message rõ**, không tạo bundle sai.
+
+## 9. Rủi ro / giới hạn
+
+- Độ đúng của `delta`: COPY đè file, RUN xoá file, symlink, quyền — phải ghi đủ `A/M/D`; đây là phần
+  dễ sai nhất, cần test round-trip byte-for-byte.
+- Cần mạng để tải base đích (đúng một lần, trong cùng lệnh export). Không có mạng → báo lỗi rõ,
+  hoặc dùng base đích đã có trong store.
+- Không "dịch" được mã máy — đây là giới hạn vật lý, phải nói rõ trong docs và trong thông báo lỗi.
+- Đây là phạm vi **2.1.0**, không đụng bản `v2.0.1` đã release.
