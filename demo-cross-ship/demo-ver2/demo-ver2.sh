@@ -20,70 +20,51 @@ SO=(-q -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ConnectTim
 
 # Mô tả từng bước: máy nào, làm gì, gõ lệnh gì, thấy gì.
 declare -A NOTE=(
-[P1]='MÁY  : Laptop (terminal bạn đang đứng)
-VIỆC : Lấy binary build từ source, rồi để CLI tự sinh Dockerfile
-GÕ   : $ ./build-local.sh
-       $ ./minicontainer-linux-x86_64 --version
-       $ ./minicontainer-linux-x86_64 init /tmp/mc-demo-init --pip=Pillow
-       $ diff app/Dockerfile /tmp/mc-demo-init/Dockerfile
-THẤY : diff rỗng — Dockerfile demo đúng y output của init (không viết tay)'
-[P2]='MÁY  : Laptop -> TV BOX (archive) + TV BOX
-VIỆC : Cài binary aarch64, đóng gói app/ thành app.tar.gz rồi giải nén trên box
-GÕ   : $ scp minicontainer-linux-aarch64 root@<IP_BOX>:/root/
-       $ ssh root@<IP_BOX> install -m755 /root/minicontainer-linux-aarch64 /usr/local/bin/minicontainer
-       $ tar czf app.tar.gz -C . app
-       $ scp app.tar.gz root@<IP_BOX>:/root/demo-mc/ver2-normal/
-       $ ssh root@<IP_BOX> "cd /root/demo-mc/ver2-normal && tar xzf app.tar.gz"
-THẤY : sha256 khớp, app/ có Dockerfile + app.py'
+[P1]='MÁY  : Laptop
+VIỆC : init sinh Dockerfile; binary build từ source
+GÕ   : $ minicontainer init /tmp/mc-demo-init --pip=Pillow
+THẤY : 2.0.1 · Dockerfile khớp y hệt output init'
+[P2]='MÁY  : Laptop -> TV BOX
+VIỆC : Cài binary, gửi app/ bằng 1 file .tar.gz
+GÕ   : $ tar czf app.tar.gz -C . app && scp app.tar.gz root@<IP_BOX>:...
+THẤY : sha khớp, app/ có Dockerfile + app.py'
 [A1]='MÁY  : TV BOX
-VIỆC : Build app bằng đúng lệnh pip install bình thường rồi chạy
-GÕ   : $ minicontainer pull --platform=linux/arm64 python:3.12-alpine
-       $ minicontainer build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
-       $ minicontainer run -d --name app-arm --image=app-arm-1 --ram=128M --net=bridge python /app/app.py
-       $ minicontainer logs app-arm
-THẤY : pip tải pillow-...aarch64.whl; elf_e_machine=183; cpu_ms ~12'
+VIỆC : Build + chạy native bằng pip install bình thường
+GÕ   : $ minicontainer build --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
+THẤY : wheel aarch64 · e_machine=183 · cpu_ms ~12'
 [A2]='MÁY  : TV BOX
-VIỆC : Đóng gói image vừa build thành bundle để gửi laptop
-GÕ   : $ minicontainer export app-arm-1 -o /root/demo-mc/ver2-normal/app-arm-from-box.tar.gz
+VIỆC : Đóng gói image vừa chạy thành bundle
+GÕ   : $ minicontainer export app-arm-1 -o app-arm-from-box.tar.gz
 THẤY : bundle arm64 + sha256'
-[A2b]='MÁY  : TV BOX -> Laptop (scp)
-VIỆC : Mang bundle arm64 về laptop
-GÕ   : $ scp root@<IP_BOX>:/root/demo-mc/ver2-normal/app-arm-from-box.tar.gz results-normal/
-THẤY : sha256 trùng khớp'
+[A2b]='MÁY  : TV BOX -> Laptop
+VIỆC : Gửi bundle về laptop
+GÕ   : $ scp root@<IP_BOX>:.../app-arm-from-box.tar.gz results-normal/
+THẤY : sha khớp'
 [A3]='MÁY  : Laptop
-VIỆC : CỐ TÌNH chạy image arm64 của box trên laptop -> phải thấy giả lập
-GÕ   : $ minicontainer import /demo/demo-ver2/results-normal/app-arm-from-box.tar.gz
-       $ minicontainer run -d --name ship-wrong --image=app-arm-1 --ram=128M --net=bridge python /app/app.py
-       $ minicontainer logs ship-wrong
-THẤY : vẫn elf_e_machine=183 nhưng cpu_ms ~4 (chậm hơn native nhiều) -> FAIL ĐỘ'
+VIỆC : Thử bundle arm trên laptop → phải thấy giả lập
+GÕ   : $ minicontainer run --image=app-arm-1 python /app/app.py
+THẤY : e_machine=183 nhưng cpu_ms ~4 → FAIL ĐỘ'
 [A4]='MÁY  : Laptop
-VIỆC : CÙNG Dockerfile, build lại tại laptop -> pip tự chọn wheel x86_64
-GÕ   : $ minicontainer pull --platform=linux/amd64 python:3.12-alpine
-       $ minicontainer build --no-cache --platform=linux/amd64 -t app-x86:1 /demo/demo-ver2/app
-       $ minicontainer run -d --name build-right --image=app-x86-1 --ram=128M --net=bridge python /app/app.py
-       $ minicontainer logs build-right
-THẤY : pillow-...x86_64.whl; elf_e_machine=62; cpu_ms ~0.6 -> ĐÚNG'
+VIỆC : CÙNG Dockerfile, build native x86 rồi export
+GÕ   : $ minicontainer build --platform=linux/amd64 -t app-x86:1 /demo/demo-ver2/app
+THẤY : wheel x86_64 · e_machine=62 · cpu_ms ~0.6'
 [B1]='MÁY  : Laptop
-VIỆC : Kiểm tra bundle x86 vừa export
-GÕ   : $ ls -lh results-normal/app-x86-from-laptop.tar.gz
-       $ sha256sum results-normal/app-x86-from-laptop.tar.gz
+VIỆC : Kiểm tra bundle vừa export
+GÕ   : $ sha256sum app-x86-from-laptop.tar.gz
 THẤY : file ~28 MB + sha256'
-[B1b]='MÁY  : Laptop -> TV BOX (scp)
-VIỆC : Gửi bundle x86 sang box
-GÕ   : $ scp results-normal/app-x86-from-laptop.tar.gz root@<IP_BOX>:/root/demo-mc/ver2-normal/
-THẤY : sha256 trùng khớp'
+[B1b]='MÁY  : Laptop -> TV BOX
+VIỆC : Gửi bundle sang box
+GÕ   : $ scp app-x86-from-laptop.tar.gz root@<IP_BOX>:...
+THẤY : sha khớp'
 [B2]='MÁY  : TV BOX
-VIỆC : CỐ TÌNH chạy image x86 trên box ARM -> phải lỗi
-GÕ   : $ minicontainer import /root/demo-mc/ver2-normal/app-x86-from-laptop.tar.gz
-       $ minicontainer run --name ship-wrong2 --image=app-x86-1 python /app/app.py
-THẤY : execvp: Exec format error -> FAIL ĐỘ'
+VIỆC : Thử bundle x86 trên box ARM → phải lỗi
+GÕ   : $ minicontainer run --image=app-x86-1 python /app/app.py
+THẤY : execvp: Exec format error → FAIL ĐỘ'
 [B3]='MÁY  : TV BOX
-VIỆC : Build lại tại box bằng cùng Dockerfile, cùng lệnh pip
-GÕ   : $ minicontainer pull --platform=linux/arm64 python:3.12-alpine
-       $ minicontainer build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
-       $ minicontainer run -d --name build-right2 --image=app-arm-1 --ram=128M --net=bridge python /app/app.py
-THẤY : wheel aarch64; elf_e_machine=183; cpu_ms ~12 -> ĐÚNG'
-[Z]='VIỆC : Tổng kết — log từng bước nằm trong results-normal/'
+VIỆC : Build native lại trên box bằng cùng Dockerfile
+GÕ   : $ minicontainer build --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
+THẤY : wheel aarch64 · e_machine=183 → ĐÚNG'
+[Z]='VIỆC : Xong — log trong results-normal/'
 )
 
 step() {
@@ -140,12 +121,8 @@ echo "--- người dùng gõ 1 lệnh: init --pip=Pillow ---"
 rm -rf /tmp/mc-demo-init
 ./minicontainer-linux-x86_64 init /tmp/mc-demo-init --pip=Pillow
 echo "--- Dockerfile do init sinh ra ---"
-cat /tmp/mc-demo-init/Dockerfile
-echo "--- so sánh với Dockerfile demo ---"
-diff -u "'$HERE'/app/Dockerfile" /tmp/mc-demo-init/Dockerfile \
-  && echo "GIỐNG: Dockerfile demo đúng y hệt output của init (không viết tay)"
-echo "--- app.py sinh ra (scaffold, demo ghi đè bằng app thật) ---"
-head -5 /tmp/mc-demo-init/app.py
+diff -q "'$HERE'/app/Dockerfile" /tmp/mc-demo-init/Dockerfile \
+  && echo "=> Dockerfile demo = output cua init (khong viet tay)"
 '
 
 if ! docker image inspect mc-demo-laptop >/dev/null 2>&1; then
@@ -174,8 +151,7 @@ step A1 "box-normal-build-and-run" boxsh '
 set -eu
 MC=/usr/local/bin/minicontainer
 $MC pull --platform=linux/arm64 python:3.12-alpine 2>&1 | tail -1
-echo "--- cùng lệnh pip install như mọi người dùng ---"
-$MC build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
+$MC build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app 2>&1 | grep -E "Downloading pillow-|build:" | tail -4
 $MC run -d --name app-arm --image=app-arm-1 --ram=128M --net=bridge python /app/app.py
 sleep 8
 OUT=$($MC logs app-arm); echo "$OUT"
@@ -203,7 +179,7 @@ $MC import /demo/demo-ver2/results-normal/app-arm-from-box.tar.gz
 $MC rm -f ship-wrong >/dev/null 2>&1 || true
 $MC run -d --name ship-wrong --image=app-arm-1 --ram=128M --net=bridge python /app/app.py 2>&1
 sleep 8
-OUT=$($MC logs ship-wrong 2>&1); echo "$OUT"
+OUT=$($MC logs ship-wrong 2>&1); echo "$OUT" | grep -oE "\"elf_e_machine\": [0-9]+|\"cpu_ms\": [0-9.]+" | tr "\\n" " "; echo
 if echo "$OUT" | grep -q "\"elf_e_machine\": 183"; then
   echo "=> FAIL DO: ảnh từ box có .so aarch64; laptop phải giả lập (xem cpu_ms)."
 else
@@ -214,10 +190,8 @@ fi
 step A4 "laptop-normal-build-and-run" lap '
 set -eu
 MC=/usr/local/bin/minicontainer
-echo "--- CÙNG Dockerfile, CÙNG lệnh pip install ---"
-cat /demo/demo-ver2/app/Dockerfile
 $MC pull --platform=linux/amd64 python:3.12-alpine 2>&1 | tail -1
-$MC build --no-cache --platform=linux/amd64 -t app-x86:1 /demo/demo-ver2/app
+$MC build --no-cache --platform=linux/amd64 -t app-x86:1 /demo/demo-ver2/app 2>&1 | grep -E "Downloading pillow-|build:" | tail -4
 $MC rm -f build-right >/dev/null 2>&1 || true
 $MC run -d --name build-right --image=app-x86-1 --ram=128M --net=bridge python /app/app.py
 sleep 8
@@ -234,7 +208,6 @@ sha256sum /demo/demo-ver2/results-normal/app-x86-from-laptop.tar.gz
 ###############################################################################
 
 step B1 "bundle-ready" bash -c '
-ls -lh "'$RES'/app-x86-from-laptop.tar.gz"
 sha256sum "'$RES'/app-x86-from-laptop.tar.gz"
 '
 do_b1b() {
@@ -250,17 +223,15 @@ $MC import /root/demo-mc/ver2-normal/app-x86-from-laptop.tar.gz
 $MC rm -f ship-wrong2 >/dev/null 2>&1 || true
 $MC run -d --name ship-wrong2 --image=app-x86-1 --ram=128M --net=bridge python /app/app.py 2>&1
 sleep 6
-OUT=$($MC logs ship-wrong2 2>&1); echo "$OUT"
+OUT=$($MC logs ship-wrong2 2>&1); echo "$OUT" | head -1
 echo "=> FAIL DO: ảnh từ laptop có .so x86_64, box không chạy được"
 '
 
 step B3 "box-normal-build-and-run" boxsh '
 set -eu
 MC=/usr/local/bin/minicontainer
-echo "--- CÙNG Dockerfile, CÙNG lệnh pip install ---"
-cat /root/demo-mc/ver2-normal/app/Dockerfile
 $MC pull --platform=linux/arm64 python:3.12-alpine 2>&1 | tail -1
-$MC build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app
+$MC build --no-cache --platform=linux/arm64 -t app-arm:1 /root/demo-mc/ver2-normal/app 2>&1 | grep -E "Downloading pillow-|build:" | tail -4
 $MC rm -f build-right2 >/dev/null 2>&1 || true
 $MC run -d --name build-right2 --image=app-arm-1 --ram=128M --net=bridge python /app/app.py
 sleep 8
@@ -270,6 +241,5 @@ echo "=> PASS: pip tự tải wheel aarch64, chạy native trên TV Box"
 '
 
 step Z "summary" bash -c '
-echo "Demo ver2 (normal flow) xong. Log: '"$RES"'"
-ls -1 '"$RES"'/*.log
+echo "Demo ver2 xong. Log: '"$RES"'"
 '

@@ -1,8 +1,9 @@
 # Demo ver2 — flow làm việc bình thường: `pip install` y nguyên, hệ thống gánh phần còn lại
 
 Chạy: `../build-local.sh` (1 lần) rồi `BOX=<IP_BOX> SSHPASS_FILE=<file> bash demo-ver2.sh`
-Log thật: `results-normal/*.log` · lần chạy cuối 23:37:07 → 23:40:38 (≈ 3 phút 31 giây), binary `2.0.1-dev`.
-Mỗi bước in `MÁY / VIỆC / GÕ / THẤY` trước khi chạy lệnh thật.
+Log thật: `results-normal/*.log` · lần chạy cuối 01:12:59 → 01:16:29 (≈ 3 phút 30 giây), binary `2.0.1-dev`.
+Mỗi bước in `MÁY / VIỆC / GÕ / THẤY` trước khi chạy lệnh thật. Output đã gọt gọn 23/11:
+mỗi bước chỉ 4 dòng mô tả + 1 dòng kết quả, build chỉ hiện dòng wheel + build, phản diện 1 dòng.
 
 ---
 
@@ -42,23 +43,23 @@ build trên box → wheel `aarch64`; build trên laptop → wheel `x86_64`.
 |---|---|---|
 | **P1** | `build-local.sh` → binary x86_64 từ source; `init --pip=Pillow` sinh Dockerfile; `diff` với Dockerfile demo | `2.0.1-dev (x86_64, glibc, static)`; `init` tạo 3 file; **diff rỗng** → Dockerfile demo đúng y output của `init` |
 | **P2** | Cài binary aarch64 vào box; đóng gói `app/` thành `app.tar.gz`, scp rồi giải nén trên box | `2.0.1-dev (aarch64, musl, static)`, 2 file, 116 B + 1478 B |
-| **A1** | Trên box: `pull arm64` → `build` → `run` | pip tự tải `pillow-13.0.0-…aarch64.whl`; `e_machine=183`, `cpu_ms=11.9` → ✅ |
-| **A2/A2b** | `export` bundle arm (**28 MB**, sha `08d98d49…0394`) → scp laptop | sha khớp |
-| **A3 (SAI)** | Laptop import bundle từ box, chạy | `e_machine=183` trên kernel laptop, `cpu_ms=3.6` (~7× chậm) → ❌ phải giả lập |
+| **A1** | Trên box: `pull arm64` → `build` → `run` | pip tự tải `pillow-13.0.0-…aarch64.whl`; `e_machine=183`, `cpu_ms=12.4` → ✅ |
+| **A2/A2b** | `export` bundle arm (**28 MB**, sha `a09ea2d6…55bd0`) → scp laptop | sha khớp |
+| **A3 (SAI)** | Laptop import bundle từ box, chạy | `e_machine=183` trên kernel laptop, `cpu_ms=3.7` (~7× chậm) → ❌ phải giả lập |
 | **A4 (ĐÚNG)** | Trên laptop: **cùng Dockerfile**, `pull amd64` → `build` → `run` | pip tự tải `…x86_64.whl`; `e_machine=62`, `cpu_ms=0.6` → ✅ |
-| **B1/B1b** | Laptop export bundle x86 (**28 MB**, sha `9b93a6c9…332cc`) → scp box | sha khớp |
+| **B1/B1b** | Laptop export bundle x86 (**28 MB**, sha `494eaed0…2c88`) → scp box | sha khớp |
 | **B2 (SAI)** | Box import bundle từ laptop, chạy | `execvp: Exec format error` → ❌ |
-| **B3 (ĐÚNG)** | Trên box: **cùng Dockerfile**, build lại | pip tự tải wheel aarch64; `e_machine=183`, `cpu_ms=13.5` → ✅ |
+| **B3 (ĐÚNG)** | Trên box: **cùng Dockerfile**, build lại | pip tự tải wheel aarch64; `e_machine=183`, `cpu_ms=12.2` → ✅ |
 
 ### Bảng chốt
 
 | Máy | Cách có image | e_machine | cpu_ms | Kết quả |
 |---|---|---|---|---|
-| Box | build tại box | 183 | 11,9 | ✅ |
-| Laptop | ship ảnh box | 183 | 3,6 | ❌ giả lập |
+| Box | build tại box | 183 | 12,4 | ✅ |
+| Laptop | ship ảnh box | 183 | 3,7 | ❌ giả lập |
 | Laptop | build tại laptop | 62 | 0,6 | ✅ |
 | Box | ship ảnh laptop | — | — | ❌ `Exec format error` |
-| Box | build tại box (lần 2) | 183 | 13,5 | ✅ |
+| Box | build tại box (lần 2) | 183 | 12,2 | ✅ |
 
 Cả 5 lần: cùng `png_sha256_16 = fed3f8e7384ce294`, cùng `prime_count = 17984`.
 
