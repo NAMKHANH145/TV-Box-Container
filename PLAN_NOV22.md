@@ -221,3 +221,47 @@ tiết. Và với `app-arm` (Pillow): export phải **fail với message rõ**, 
   hoặc dùng base đích đã có trong store.
 - Không "dịch" được mã máy — đây là giới hạn vật lý, phải nói rõ trong docs và trong thông báo lỗi.
 - Đây là phạm vi **2.1.0**, không đụng bản `v2.0.1` đã release.
+
+---
+
+# Ý tưởng bổ sung 23/11 — nâng v3 thành cross-arch container thật (tạm hoãn)
+
+Quyết định hiện tại: **giữ v3 như cũ**, nhưng phải ghi rõ thông điệp để không nói quá đà.
+
+## 1. Đánh giá trung thực v3 hiện tại
+
+v3 đang chứng minh **tầng app/HAL portability**, không phải tầng image portability:
+
+- Có thật: cùng 1 `hwprobe.py` chạy trên aarch64 (rootfs Buildroot có sẵn) và x86_64 (image OCI Alpine
+  tự build); HAL dịch `ttyAML0`/`ttyS*` → `uart/gpio/i2c/thermal`; ép sai backend → `WRONG_BACKEND`.
+- Chưa có thật: box dùng `--rootfs /opt/rootfs-python-edge`, laptop dùng `--image=hwprobe-1` — hai
+  luồng khác nhau; không có `export → scp → import` một bundle giữa hai máy; không có ELF/wheel nào
+  đi qua nên né được phần khó của v1/v2.
+- Vì vậy không được gọi v3 là "ship image đa kiến trúc". Đây là chiến lược *gửi source, dùng runtime
+  có sẵn ở đích* — hợp lệ, nhưng khác v1/v2.
+
+## 2. Hướng nâng cấp (khi làm thì đi cùng v2.1.0 hoặc 2.2.0)
+
+1. **Cùng luồng container ở 2 đầu**: build image OCI từ **cùng 1 Dockerfile** (`FROM python:3.12-alpine`
+   + `COPY hwprobe.py`) trên cả box lẫn laptop; bỏ `--rootfs` ở box, dùng `--image` như laptop.
+2. **Bundle đa kiến trúc**: `export --arch=...` gồm cả 2 biến thể → gửi đúng 1 file; bên nhận `import`
+   tự chọn theo `MC_ARCH` (dùng cơ chế đã có từ v2.0.1).
+3. **Giữ nguyên 2 ca phản diện** `HW_BACKEND=pc_x86` (box) và `HW_BACKEND=amlogic` (laptop) để vẫn
+   chứng minh HAL. Khi đó v3 vừa là cross-arch container thật, vừa là HAL.
+4. **Thêm ca "ép đúng"** (tuỳ chọn, dễ hiểu hơn): box ép `HW_BACKEND=amlogic`, laptop ép
+   `HW_BACKEND=pc_x86` → vẫn `OK`, chỉ khác `selected_by: forced`. Giải thích rõ: `HW_BACKEND` là
+   công tắc chọn **bảng tên thiết bị**, không đổi kiến trúc CPU; ép đúng thì bảng trúng thiết bị thật.
+
+## 3. Tiêu chí nếu làm
+
+- Box và laptop đều `run --image=hwprobe-...`; cùng Dockerfile, cùng lệnh chạy.
+- Một bundle duy nhất đi qua mạng; log in `chon bien the <arch>`.
+- 4 ca cũ + 2 ca ép đúng đều có `grep` khẳng định; README đổi thông điệp từ "ship file" sang
+  "ship 1 image đa arch chạy native + HAL dịch phần cứng".
+
+## 4. Ghi chú về `HW_BACKEND` (để khỏi hiểu nhầm)
+
+- Là env do người dùng truyền qua `--env HW_BACKEND=...`, **không phải** script tự thống nhất rồi ghi.
+- Chỉ tồn tại trong 2 lệnh ép sai; các ca auto không có biến này.
+- `status = OK if spec and not missing else (WRONG_BACKEND if how == "forced" else PARTIAL)` —
+  nên ép đúng vẫn `OK`, ép sai mới `WRONG_BACKEND`.
