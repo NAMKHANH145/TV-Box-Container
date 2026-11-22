@@ -1455,3 +1455,15 @@ Demo v1 chay lai 00:27:11 -> 00:30:33 (3m22) bang binary 2.0.1-dev:
 
 Gioi han da ghi ro: may export van phai build/pull ban arch dich de dua vao bundle; runtime chi chon.
 Khong tag/release. Docs cap nhat: README.md (CLI + performance), demo-cross-ship/README.md, PLAN_NOV22.md.
+
+## Phat hanh v2.0.1 (2026-11-23 00:48)
+
+- Commit `5232683` (source/test/docs/demo) + `e6c62e0` (CI doc version dong) da push main.
+- CI lan dau do: smoke-sdk hard-code `"version":"2.0.0"`; da sua thanh doc `MC_VERSION` tu
+  `build/src/common.h`. Tag `v2.0.1` duoc tao lai (xoa + tao, khong force-push nhanh) de chay
+  workflow da sua.
+- Ket qua cuoi: run main `45051436117` va run tag `45051481251` deu **success** (3m16 / 3m13).
+- Release published https://github.com/NAMKHANH145/TV-Box-Container/releases/tag/v2.0.1
+  vo **8 asset**: 4 binary musl (aarch64 281.496 B, armv7l 264.188 B, riscv64 252.792 B,
+  x86_64 257.232 B), `install.sh` 5.537 B, `test.sh` 42.472 B, `smoke-sdk.sh` 2.838 B,
+  `SHA256SUMS.txt` 604 B. Kich thuoc CI khac binary Buildroot local (288.304 B) do khac toolchain.
