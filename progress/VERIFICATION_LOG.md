@@ -1467,3 +1467,13 @@ Khong tag/release. Docs cap nhat: README.md (CLI + performance), demo-cross-ship
   vo **8 asset**: 4 binary musl (aarch64 281.496 B, armv7l 264.188 B, riscv64 252.792 B,
   x86_64 257.232 B), `install.sh` 5.537 B, `test.sh` 42.472 B, `smoke-sdk.sh` 2.838 B,
   `SHA256SUMS.txt` 604 B. Kich thuoc CI khac binary Buildroot local (288.304 B) do khac toolchain.
+
+## v3 ram ro hon (2026-11-23 01:21)
+
+- `hwprobe.py` (2 ban: rootfs box + app laptop) in them 1 dong tom tat sau JSON:
+  `=> backend=... (auto/forced) | uart=... | gpio=... | i2c=... | ...C | missing=... | status=...`.
+- `demo-v3.sh`: banner 3 dong "doc ket qua", NOTE rut gon con 1 lenh/buoc, va them grep khang dinh
+  4 ca (A1 OK+amlogic, A2 WRONG_BACKEND+uart 0, B1 OK+pc_x86, B1 ep WRONG_BACKEND+uart 0).
+- Chay lai 01:21:14 -> 01:21:43 (29 s), 4/4 khang dinh dat:
+  box amlogic/57 C/OK, ep pc_x86 uart=0/WRONG_BACKEND; laptop pc_x86/81 C/OK, ep amlogic uart=0/WRONG_BACKEND.
+- README v3 them bang "Cach doc output" va cap nhat nhiet do/thoi gian.

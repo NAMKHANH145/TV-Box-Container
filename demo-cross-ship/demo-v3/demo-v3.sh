@@ -20,41 +20,27 @@ MOUNTS=(--mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind)
 
 # Mô tả từng bước: máy nào, làm gì, gõ lệnh gì, thấy gì.
 declare -A NOTE=(
-[P1]='MÁY  : Laptop (terminal bạn đang đứng)
-VIỆC : Chuẩn bị binary build từ source
-GÕ   : $ ./build-local.sh
-       $ ./minicontainer-linux-x86_64 --version
-THẤY : minicontainer 2.0.1-dev (x86_64, glibc, static)'
-[P2]='MÁY  : Laptop -> TV BOX (archive) + TV BOX
-VIỆC : Cài binary aarch64, đóng gói hwprobe.py rồi giải nén vào rootfs Buildroot
-GÕ   : $ scp minicontainer-linux-aarch64 root@<IP_BOX>:/root/
-       $ ssh root@<IP_BOX> install -m755 /root/minicontainer-linux-aarch64 /usr/local/bin/minicontainer
-       $ tar czf hwprobe.tar.gz -C . hwprobe.py
-       $ scp hwprobe.tar.gz root@<IP_BOX>:/root/demo-mc/v3/
-       $ ssh root@<IP_BOX> "cd /root/demo-mc/v3 && tar xzf hwprobe.tar.gz"
-THẤY : 2.0.1-dev (aarch64, musl, static); rootfs NAME=Buildroot, Python 3.14'
-[A1]='MÁY  : TV BOX
-VIỆC : Chạy hwprobe.py trong rootfs Buildroot, cho phép đọc /dev và /sys thật
-GÕ   : $ minicontainer run --rm --rootfs /opt/rootfs-python-edge \
-         --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
-         /usr/bin/python3 /hwprobe.py
-THẤY : backend=amlogic, uart=ttyAML0, 2 GPIO, 1 I2C, ~55-65°C, status=OK'
+[P1]='MÁY  : Laptop
+VIỆC : Dùng binary build từ source
+GÕ   : $ ./minicontainer-linux-x86_64 --version
+THẤY : 2.0.1'
+[P2]='MÁY  : Laptop -> TV BOX
+VIỆC : Cài binary, gửi 1 file hwprobe.py vào rootfs Buildroot có sẵn
+GÕ   : $ tar czf hwprobe.tar.gz hwprobe.py && scp ... && tar xzf ...
+THẤY : rootfs NAME=Buildroot, Python 3.14'
+[A1]='MÁY  : TV BOX (Amlogic S905W)
+VIỆC : Chạy hwprobe.py, tự thấy ttyAML0 → backend amlogic
+GÕ   : $ minicontainer run --rootfs /opt/rootfs-python-edge ... /usr/bin/python3 /hwprobe.py
+THẤY : UART=1 · status=OK (có UART → app chạy đúng)'
 [A2]='MÁY  : TV BOX
-VIỆC : CỐ TÌNH ép backend pc_x86 trên box Amlogic -> phải báo sai
-GÕ   : $ minicontainer run --rm --rootfs /opt/rootfs-python-edge \
-         --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
-         --env HW_BACKEND=pc_x86 /usr/bin/python3 /hwprobe.py
-THẤY : uart count=0, missing=["uart"], status=WRONG_BACKEND'
-[B1]='MÁY  : Laptop
-VIỆC : Build image OCI cho laptop rồi chạy CÙNG hwprobe.py
-GÕ   : $ minicontainer pull --platform=linux/amd64 python:3.12-alpine
-       $ minicontainer build --no-cache --platform=linux/amd64 -t hwprobe-1 /demo/demo-v3/app
-       $ minicontainer run --rm --image=hwprobe-1 \
-         --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
-         python /hwprobe.py
-       $ minicontainer run --rm --image=hwprobe-1 ... --env HW_BACKEND=amlogic python /hwprobe.py
-THẤY : auto -> backend=pc_x86, 32 ttyS, status=OK; ép amlogic -> WRONG_BACKEND'
-[Z]='VIỆC : Tổng kết — log từng bước nằm trong results-v3/'
+VIỆC : Ép HW_BACKEND=pc_x86 dù board là Amlogic → phản diện
+GÕ   : $ minicontainer run ... --env HW_BACKEND=pc_x86 /usr/bin/python3 /hwprobe.py
+THẤY : UART=0 · missing=[uart] · status=WRONG_BACKEND'
+[B1]='MÁY  : Laptop (x86_64)
+VIỆC : CÙNG hwprobe.py: tự thấy ttyS* → pc_x86; rồi ép amlogic
+GÕ   : $ minicontainer run --image=hwprobe-1 ... python /hwprobe.py
+THẤY : auto UART=32 OK · ép amlogic UART=0 WRONG_BACKEND'
+[Z]='VIỆC : Tổng kết 4 ca — log trong results-v3/'
 )
 
 step() {
@@ -90,6 +76,10 @@ install -m755 /demo/minicontainer-linux-x86_64 /usr/local/bin/minicontainer
 
 echo "############################################################"
 echo "# MÁY: TV BOX (rootfs Buildroot) + Laptop                        #"
+echo "############################################################"
+echo "# ĐỌC KẾT QUẢ: backend=board được chọn | selected_by=auto/ép     #"
+echo "# capabilities=UART/GPIO/I2C/nhiệt độ | missing=thieu           #"
+echo "# status=OK (đúng board) hoặc WRONG_BACKEND (ép sai board)      #"
 echo "############################################################"
 
 step P1 "prepare" bash -c '
@@ -131,17 +121,25 @@ fi
 
 step A1 "box-auto-backend" boxsh '
 MC=/usr/local/bin/minicontainer
-$MC run --rm --rootfs /opt/rootfs-python-edge \
+OUT=$($MC run --rm --rootfs /opt/rootfs-python-edge \
   --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
-  /usr/bin/python3 /hwprobe.py
+  /usr/bin/python3 /hwprobe.py)
+echo "$OUT"
+echo "$OUT" | grep -q "\"status\": \"OK\""
+echo "$OUT" | grep -q "\"backend\": \"amlogic\""
+echo "=> XÁC NHẬN: box tự chọn amlogic, có UART, status OK"
 '
 
 step A2 "box-FORCED-wrong-backend" boxsh '
 MC=/usr/local/bin/minicontainer
-$MC run --rm --rootfs /opt/rootfs-python-edge \
+OUT=$($MC run --rm --rootfs /opt/rootfs-python-edge \
   --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
   --env HW_BACKEND=pc_x86 \
-  /usr/bin/python3 /hwprobe.py
+  /usr/bin/python3 /hwprobe.py)
+echo "$OUT"
+echo "$OUT" | grep -q "WRONG_BACKEND"
+echo "$OUT" | grep -q "\"uart\": {\"count\": 0"
+echo "=> XÁC NHẬN: ép pc_x86 trên board Amlogic → mất UART"
 '
 
 ###############################################################################
@@ -153,18 +151,26 @@ set -eu
 MC=/usr/local/bin/minicontainer
 $MC pull --platform=linux/amd64 python:3.12-alpine 2>&1 | tail -1
 $MC build --no-cache --platform=linux/amd64 -t hwprobe-1 /demo/demo-v3/app
-echo "--- auto detect trên laptop ---"
-$MC run --rm --image=hwprobe-1 \
+echo "--- tự detect trên laptop ---"
+OUT=$($MC run --rm --image=hwprobe-1 \
   --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
-  python /hwprobe.py
+  python /hwprobe.py)
+echo "$OUT"
+echo "$OUT" | grep -q "\"status\": \"OK\""
+echo "$OUT" | grep -q "\"backend\": \"pc_x86\""
+echo "=> XÁC NHẬN: laptop tự chọn pc_x86, có UART, status OK"
 echo "--- ép sai backend amlogic trên laptop ---"
-$MC run --rm --image=hwprobe-1 \
+OUT2=$($MC run --rm --image=hwprobe-1 \
   --mount bind:/dev:/hostdev:ro,rbind --mount bind:/sys:/hostsys:ro,rbind \
   --env HW_BACKEND=amlogic \
-  python /hwprobe.py
+  python /hwprobe.py)
+echo "$OUT2"
+echo "$OUT2" | grep -q "WRONG_BACKEND"
+echo "$OUT2" | grep -q "\"uart\": {\"count\": 0"
+echo "=> XÁC NHẬN: ép amlogic trên laptop → mất UART"
 '
 
 step Z "summary" bash -c '
-echo "Demo v3 (HAL) xong. Log: '"$RES"'"
-ls -1 '"$RES"'/*.log
+echo "=> BOX auto: amlogic/OK | BOX ép pc_x86: WRONG_BACKEND | LAPTOP auto: pc_x86/OK | LAPTOP ép amlogic: WRONG_BACKEND"
+echo "Log: '"$RES"'"
 '

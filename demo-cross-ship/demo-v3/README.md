@@ -1,8 +1,10 @@
 # Demo v3 — HAL dịch phần cứng: cùng 1 app, tự nhận diện board
 
 Chạy: `../build-local.sh` (1 lần) rồi `BOX=<IP_BOX> SSHPASS_FILE=<file> bash demo-v3.sh`
-Log thật: `results-v3/*.log` · lần cuối 23:40:59 → 23:41:22 (~23 giây, binary `2.0.1-dev`).
-Mỗi bước in `MÁY / VIỆC / GÕ / THẤY` trước khi chạy lệnh thật.
+Log thật: `results-v3/*.log` · lần cuối 01:21:14 → 01:21:43 (~29 giây, binary `2.0.1`).
+Mỗi bước in `MÁY / VIỆC / GÕ / THẤY` trước khi chạy lệnh thật. Output có 2 dòng: JSON (để script
+kiểm chứng) + 1 dòng tóm tắt `=> backend=... | uart=... | ... | status=...` để đọc nhanh, kèm 1 dòng
+`XÁC NHẬN` sau mỗi ca.
 
 ---
 
@@ -20,7 +22,7 @@ Hai môi trường này **khác nhau ở tên thiết bị gốc**:
 | UART | `ttyAML0` (meson_uart) | `ttyS0…ttyS31` (8250/16550) |
 | GPIO chip | 2 | 1 |
 | I2C bus | 1 (`i2c-0`) | 17 |
-| Nhiệt độ | ~59 °C | ~66 °C |
+| Nhiệt độ | ~57 °C | ~81 °C |
 | Kernel | `6.18.38-meson64` | `6.8.0-124-generic` |
 
 Code không được hard-code tên nào trong đó. Nó có **lớp HAL** dịch tên riêng của từng board
@@ -49,16 +51,34 @@ elif glob.glob("/hostdev/ttyS*"): backend = "pc_x86"
 
 Có thể ép sai bằng `--env HW_BACKEND=...` để làm phản diện.
 
+### Cách đọc output (chỗ dễ nhầm nhất)
+
+```text
+=> backend=amlogic (auto:ttyAML) | uart=1 | gpio=2 | i2c=1 | 57.0C | missing=[] | OK
+```
+
+| Trường | Nghĩa |
+|---|---|
+| `backend` | board mà HAL **đã chọn**: `amlogic` (có `ttyAML*`) hoặc `pc_x86` (có `ttyS*`) |
+| `auto:ttyAML` / `forced` | tự nhận diện, hay bị ép qua `HW_BACKEND=` |
+| `uart / gpio / i2c` | số thiết bị tìm thấy **theo backend đang dùng** (không phải số thiết bị vật lý) |
+| `missing` | khả năng bị mất do chọn sai backend — ở đây `['uart']` là dấu hiệu ép sai |
+| `status` | `OK` = backend khớp board; `WRONG_BACKEND` = ép sai |
+| `soc_hint` | chỉ là gợi ý hiển thị, không quyết định logic |
+
+Vì vậy cùng một box, auto có `uart=1` nhưng ép `pc_x86` thì `uart=0` → `WRONG_BACKEND`.
+Script đã thêm `grep` khẳng định 4 ca này, không chỉ in JSON cho xem.
+
 ---
 
 ## 3. Kết quả thật
 
 | Case | Máy / rootfs | backend | UART | GPIO | I2C | Nhiệt | status |
 |---|---|---|---|---|---|---|---|
-| A1 auto | Box / Buildroot `python-edge` | `amlogic` (auto:ttyAML) | 1 × ttyAML0 | 2 | 1 | ≈55–65 °C | **OK** |
-| A2 ép sai | Box / Buildroot | `pc_x86` (forced) | **0** | 2 | 1 | ≈64 °C | **WRONG_BACKEND**, `missing=['uart']` |
-| B1 auto | Laptop / OCI alpine | `pc_x86` (auto:ttyS) | 32 × ttyS* | 1 | 17 | ≈55–76 °C | **OK** |
-| B1 ép sai | Laptop / OCI alpine | `amlogic` (forced) | **0** | 1 | 17 | ≈55–76 °C | **WRONG_BACKEND**, `missing=['uart']` |
+| A1 auto | Box / Buildroot `python-edge` | `amlogic` (auto:ttyAML) | 1 × ttyAML0 | 2 | 1 | ≈57 °C | **OK** |
+| A2 ép sai | Box / Buildroot | `pc_x86` (forced) | **0** | 2 | 1 | ≈57 °C | **WRONG_BACKEND**, `missing=['uart']` |
+| B1 auto | Laptop / OCI alpine | `pc_x86` (auto:ttyS) | 32 × ttyS* | 1 | 17 | ≈81 °C | **OK** |
+| B1 ép sai | Laptop / OCI alpine | `amlogic` (forced) | **0** | 1 | 17 | ≈81 °C | **WRONG_BACKEND**, `missing=['uart']` |
 
 Cùng `program=hwprobe.py (HAL)`, cùng `pid=1`, nhưng `soc_hint` đổi theo backend:
 `Amlogic S905W (meson)` ↔ `x86_64 PC`.

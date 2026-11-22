@@ -85,6 +85,12 @@ def main():
         "missing": missing,
         "status": status,
     }, sort_keys=True))
+    # Dòng doc cho nguoi xem: JSON o tren de script kiem tra, dong nay de hieu nhanh.
+    c = caps.get("thermal") or {"celsius": 0.0}
+    print("=> backend=%s (%s) | uart=%d | gpio=%d | i2c=%d | %.1fC | missing=%s | %s"
+          % (backend, how, caps.get("uart", {}).get("count", 0),
+             caps.get("gpio", {}).get("count", 0), caps.get("i2c", {}).get("count", 0),
+             c["celsius"], missing, status))
 
 
 if __name__ == "__main__":
