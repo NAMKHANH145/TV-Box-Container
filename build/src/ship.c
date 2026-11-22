@@ -104,6 +104,50 @@ int do_import(const char *bundle, const char *key) {
         return 1;
     }
 
+    /* Multi-arch bundle: multiarch.json + <arch>.tar (each a normal ship
+     * bundle). Pick the variant matching this machine and reuse do_import(). */
+    char midx[PATH_MAX];
+    fmt_path(midx, sizeof midx, "%s/multiarch.json", stage);
+    if (access(midx, R_OK) == 0) {
+        char *mj; jsmntok_t *mt; int mnt;
+        int rc = 1;
+        if (json_parse_file(midx, &mj, &mt, &mnt) < 0) {
+            fprintf(stderr, "minicontainer: import: bad multiarch.json\n");
+        } else {
+            int vs = json_obj_get(mj, mt, 0, "variants");
+            char parch[BUF_SIZE_SMALL] = "", ppath[PATH_MAX] = "";
+            for (int i = 0; vs >= 0 && i < mt[vs].size; i++) {
+                int e = json_arr_nth(mt, vs, i);
+                int av = json_obj_get(mj, mt, e, "arch");
+                if (av < 0) continue;
+                char raw[BUF_SIZE_SMALL] = "";
+                json_tok_copy(mj, &mt[av], raw, sizeof raw);
+                char want[BUF_SIZE_SMALL];
+                if (!strcmp(raw, "amd64")) snprintf(want, sizeof want, "x86_64");
+                else if (!strcmp(raw, "arm64")) snprintf(want, sizeof want, "aarch64");
+                else snprintf(want, sizeof want, "%s", raw);
+                if (strcmp(want, MC_ARCH) == 0) {
+                    int pv = json_obj_get(mj, mt, e, "path");
+                    snprintf(parch, sizeof parch, "%s", raw);
+                    if (pv >= 0) json_tok_copy(mj, &mt[pv], ppath, sizeof ppath);
+                    break;
+                }
+            }
+            json_free(mj, mt);
+            if (!ppath[0]) {
+                fprintf(stderr, "minicontainer: import: bundle khong co bien the cho %s\n", MC_ARCH);
+            } else {
+                char inner[PATH_MAX];
+                fmt_path(inner, sizeof inner, "%s/%s", stage, ppath);
+                printf("import: bundle da kien truc — chon bien the %s (may nay %s)\n", parch, MC_ARCH);
+                rc = do_import(inner, NULL);
+            }
+        }
+        char *const rav[] = { "/usr/bin/rm", "-rf", stage, NULL };
+        run_wait(rav);
+        return rc;
+    }
+
     char mpath[PATH_MAX];
     fmt_path(mpath, sizeof mpath, "%s/manifest.json", stage);
     char *js; jsmntok_t *t; int nt;

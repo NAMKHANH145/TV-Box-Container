@@ -1192,3 +1192,266 @@ Lệnh y nguyên workflow (`ubuntu:24.04 --privileged`, cgroup delegate, `make C
 - README: quickstart thêm bước 5 (busybox httpd qua bridge) + блок nginx qua recipe; binary size 277 KB.
 - COMPAT: thêm row "writes inside image rootfs" + "images that drop privileges"; arch count 184/0/1.
 - AGENTS.md: giữ nguyên (không sửa).
+
+## Demo ship 2 chiều TV Box ⇄ Laptop bằng minicontainer v2.0.0 (2026-11-22)
+
+Script: `demo-cross-ship/demo-cross-ship.sh` · log đầy đủ: `demo-cross-ship/results/*.log`.
+Chạy bằng `BOX=<IP_BOX> SSHPASS_FILE=<file>`; không IP/mật khẩu trong file. Laptop dùng harness
+`ubuntu:24.04 --privileged` (giống CI) để có `/usr/bin/mkdir` và cgroup delegate.
+
+### Dọn rác trước demo
+
+Xoá trên box: log/script/tarball demo cũ, binary v1.5.x, 18 image cũ (gồm 2 image x86_64),
+mọi container STOPPED; còn 0 cgroup/veth/rule NAT. Giữ `test.sh`, `soak.sh`, `bench.sh`.
+
+### Chiều A — Box → Laptop (weather.py, Open-Meteo)
+
+| Bước | Kết quả |
+|---|---|
+| A1 download GitHub | `minicontainer-linux-aarch64` sha256 `66dbec30b190ab17bd1fce0189b9575de0acb00669a43cb076d8033d9783a0ca`, verify OK |
+| A2 install + check | `2.0.0 (aarch64, musl, static)`, 11/11 ok, kernel 6.18.38-meson64, RAM 1804 MB |
+| A3 build+run trên box | `weather-arm-1` (aarch64); log `temp=22.9C, humid=75%, observed=2026-11-22T17:15, arch=aarch64, kernel=6.18.38-meson64, pid=1` |
+| A4 export | `weather-x86-from-box.tar.gz` 17 MB, sha256 `2e2959dec69932dd1cb750993c73752126bcc39d2dde77278bc6b4013bf3e6e7` |
+| A5 scp | sha256 khớp trên laptop; nội dung `manifest.json` + `image.tar` |
+| A6 import+run laptop | native `arch=x86_64`, kernel 6.8.0-124-generic; **cùng** temp 22.9C, humid 75%, `program=weather.py` |
+
+### Chiều B — Laptop → Box (repoinfo.py, GitHub API)
+
+| Bước | Kết quả |
+|---|---|
+| B1 download GitHub | `minicontainer-linux-x86_64` verify OK, `2.0.0 (x86_64, musl, static)` |
+| B2 check | 11/11 ok, kernel 6.8.0-124-generic |
+| B3 build+export | local x86: repo `NAMKHANH145/TV-Box-Container`, stars 0, branch main, `arch=x86_64`; bundle `repoinfo-arm-from-laptop.tar.gz` 17 MB, sha256 `6f025c75da3269d0349a5dd0ae0a233831cf30d85b8d48492d4d87f4c286f72a` |
+| B4 scp | sha256 khớp trên box |
+| B5 import+run box | native `arch=aarch64`, kernel 6.18.38-meson64; cùng repo/stars/branch, `pid=1` |
+
+Tổng thời gian script: 17:15:55 → 17:22:06 (≈6 phút 11 giây). Không dùng qemu, không Docker daemon.
+
+### Bài học ghi nhận
+
+- Bridge DNS: runtime đọc resolv.conf trong rootfs, từ chối `127.0.0.*` → dùng `COPY resolv.conf`.
+- Cross-arch build dùng `COPY`, không dùng `RUN` (RUN cần binfmt/qemu).
+- Phải `pull` base ngay trước mỗi `build` vì 2 arch cùng tên ref.
+- `import` cần `/usr/bin/{mkdir,rm,tar,sha256sum}` → không dùng Alpine làm harness.
+
+## Demo ver2 — phu thuoc kien truc, co negative control (2026-11-22)
+
+Script: `demo-cross-ship/demo-ver2/demo-ver2.sh` · log: `demo-cross-ship/demo-ver2/results-ver2/*.log`.
+Tai wheel Pillow 13.0.0 musllinux cho 2 arch bang `pip download --platform`, giai nen vao
+`site-packages/`, build bang `COPY` (khong `RUN`) nen ca 2 may deu build duoc ca 2 arch.
+
+| Case | May chay | elf_e_machine | cpu_ms | PNG sha16 | Ket qua |
+|---|---|---|---|---|---|
+| A1 arm native | Box S905W | 183 | 11.4 | fed3f8e7384ce294 | PASS |
+| A4 arm SAI | Laptop x86_64 (binfmt) | 183 | 3.5 | fed3f8e7384ce294 | FAIL DO (gia lap, cham ~6x) |
+| A5 x86 DUNG | Laptop x86_64 | 62 | 0.6 | fed3f8e7384ce294 | PASS |
+| B1 x86 native | Laptop x86_64 | 62 | 0.7 | fed3f8e7384ce294 | PASS |
+| B3 x86 SAI | Box aarch64 (khong binfmt) | — | — | — | `Exec format error`, FAIL DO |
+| B4 arm DUNG | Box S905W | 183 | 11.4 | fed3f8e7384ce294 | PASS |
+
+Bundle: arm tu box `e0bf0fb9…` (74 MB), x86 tu box `565f9e8c…` (69 MB), arm tu laptop
+`bee6700e…`, x86 tu laptop `8637c45c…` — sha khop ca 2 dau. Tong thoi gian 17:43:42 -> 17:51:29.
+
+Ket luan: cung chuong trinh va cung PNG hash, chi khac wheel native duoc cai; sai arch thi
+hoac khong chay duoc, hoac chay gia lap va cham hon 5-6 lan.
+
+## Demo ver2 (sua theo normal workflow) — pip install binh thuong (2026-11-22, phien 2)
+
+Script: `demo-cross-ship/demo-ver2/demo-ver2.sh` · log: `demo-cross-ship/demo-ver2/results-normal/*.log`.
+Bo cac thuat toan tai wheel tay; dung 1 Dockerfile duy nhat co `RUN pip install --no-cache-dir Pillow`.
+Build tren may nao thi pip tu tai wheel cua may do. Pull base ngay truoc moi build (tranh nhầm ref 2 arch).
+
+| Case | Cach co image | elf_machine | cpu_ms | PNG sha16 | Ket qua |
+|---|---|---|---|---|---|
+| A1 build tren box | pip tu tai wheel aarch64 | 183 | 12.0 | fed3f8e7384ce294 | PASS |
+| A3 ship anh box sang laptop | wheel aarch64 | 183 | 3.7 | fed3f8e7384ce294 | FAIL (binfmt gia lap, cham ~6x) |
+| A4 build tren laptop | pip tu tai wheel x86_64 | 62 | 0.6 | fed3f8e7384ce294 | PASS |
+| B2 ship anh laptop sang box | wheel x86_64 | — | — | — | execvp: Exec format error, FAIL |
+| B3 build lai tren box | pip tu tai wheel aarch64 | 183 | 11.8 | fed3f8e7384ce294 | PASS |
+
+Bundle: arm tu box `d4faf78c…` (84 MB), x86 tu laptop `a0104dda…` (79 MB), sha khop 2 dau.
+Tong thoi gian 18:11:01 -> 18:15:10 (~4 phut). Ket luan: nguoi dung gi nguyen lenh pip install;
+he thong tu chon wheel theo arch cua may build. Khong can --platform trick hay tai wheel tay.
+
+## Demo v3 — HAL dich phan cung, rootfs Buildroot vs OCI (2026-11-22)
+
+Script: `demo-cross-ship/demo-v3/demo-v3.sh` · log: `demo-cross-ship/demo-v3/results-v3/*.log`.
+Cung 1 file `hwprobe.py` chay tren 2 moi truong: box = rootfs Buildroot `python-edge`
+(`/opt/rootfs-python-edge`, Python 3.14); laptop = OCI `python:3.12-alpine`. Ca 2 dung chung
+`--mount bind:/dev:/hostdev:ro,rbind` + `bind:/sys:/hostsys:ro,rbind` (bind thuong loi EINVAL,
+sysfs mount thuong EPERM trong userns).
+
+| Case | backend | UART | GPIO | I2C | thermal | status |
+|---|---|---|---|---|---|---|
+| Box auto | amlogic (auto:ttyAML) | 1 (ttyAML0) | 2 | 1 | 59.0 C | OK |
+| Box ep sai pc_x86 | pc_x86 (forced) | 0 | 2 | 1 | 58.0 C | WRONG_BACKEND, missing uart |
+| Laptop auto | pc_x86 (auto:ttyS) | 32 (ttyS*) | 1 | 17 | 66.0 C | OK |
+| Laptop ep sai amlogic | amlogic (forced) | 0 | 1 | 17 | 66.0 C | WRONG_BACKEND, missing uart |
+
+Thoi gian 18:37:11 -> 18:38:22 (~1 phut). Ket luan: lop HAL dich ten thiet bi rieng cua board
+(ttyAML0 / ttyS*) thanh kha nang logic chung (uart/gpio/i2c/thermal); ep sai backend lam mat UART
+va tra WRONG_BACKEND. Khac v2 (pip chon wheel theo CPU) o tang: v3 chon driver/device theo board.
+
+## v2.0.1-dev — sua source tu ket qua 3 demo (2026-11-22)
+
+Khong tag/release (can xac nhan rieng). Binary aarch64 musl van **284.208 B** (0 warning), x86 glibc static 1.205.776 B.
+
+Thay doi:
+1. **Lenh `init <dir> [--pip=PKG]... [--base=IMAGE]`** (file moi `src/appinit.c`): sinh Dockerfile + app.py + README.md. Nguoi dung khong viet Dockerfile tay; day la phan tuong tac thieu cua 3 demo.
+2. **`build` khong ghi de resolv.conf cua rootfs** khi no da co nameserver that (host thường dùng 127.0.0.53/127.0.0.11 ma runtime tu choi). Da verify: image co `nameserver 1.1.1.1` sau `RUN`.
+3. **`build --platform` fail ro rang** khi base image khac arch may ma yeu cau arch may (loi cu: dieu nham ref sau `pull --platform` → `RUN` exit 127 vo nguyen nhan). Cross-build hop le (requested != host) van duoc phep.
+4. **Cache RUN khong replay lenh xoa** (`rm`/`rmdir`/`unlink`): cache cu chi `cp -a` them file, lam mat phep xoa. Giu nguyen cache cho RUN binh thuong. Case `file tao roi xoa trong RUN` da xanh lai.
+
+Khong lam: bind mot node thiet bi rieng le van that bai do userns khong sua duoc mount point tren rootfs cu; dung `bind:/dev:/hostdev:ro,rbind` nhu demo v3.
+
+Ket qua regression:
+- Box S905W: `test.sh` **184 PASS / 0 FAIL / 1 SKIP / 185**, T7 p50 63 ms.
+- Ubuntu 24.04 privileged (CI command): `local-test.sh` **178 PASS / 0 FAIL / 7 SKIP / 185**, T7 15 ms.
+- Smoke `init` tren box: tao Dockerfile co `RUN pip install --no-cache-dir Pillow`, app.py, README.md.
+
+
+## 3 demo chay lai bang binary source 2.0.1-dev (2026-11-22)
+
+`demo-cross-ship/build-local.sh` build 2 binary tu source va 3 script demo uu tien binary local
+(thieu moi tai release `v2.0.0`):
+- aarch64 musl: `ef0016ff5e0711deb894e3420017403d117938e63b1264dbf30d80a1f4959972`, 284.208 B
+- x86_64 static: `7e23a80e1b22c63b35654c50f6fc300a1a1620411db53add570e0636c4d08364`, 1.205.776 B
+- build 2 arch + khoi phuc artifact aarch64: **9 s**, 0 warning.
+
+Ket qua (log thuc trong `demo-cross-ship/**/results*/`):
+- **v1 ship 2 chieu** 21:52:04 -> 21:55:10 (3 m 06 s): box build weather arm chay native aarch64;
+  bundle x86 `c8f5237c..a32c` (17 MB) scp sang laptop, import + chay native x86_64, cung 20.6 C / 89 %;
+  chieu nguoc lai bundle arm `ec8cae1d..0c60` (55.9 MB), box chay native aarch64.
+- **v2 pip** 21:56:26 -> 22:00:43 (4 m 17 s): `init --pip=Pillow` sinh Dockerfile **giong y het**
+  Dockerfile demo (diff rong). Build box: wheel `...aarch64.whl`, `e_machine=183`, `cpu_ms=11.7`.
+  Build laptop: wheel `...x86_64.whl`, `e_machine=62`, `cpu_ms=0.6`. Sai arch: arm tren laptop
+  `cpu_ms=4.1` (gia lap ~7x), x86 tren box `execvp: Exec format error`. Cung PNG
+  `fed3f8e7384ce294`, `prime_count=17984`.
+- **v3 HAL** 22:01:34 -> 22:02:01 (27 s): box `amlogic`/ttyAML0/59 C/OK; ep `pc_x86` ->
+  `WRONG_BACKEND` missing=["uart"]. Laptop `pc_x86`/32 ttyS/55 C/OK; ep `amlogic` -> missing=["uart"].
+
+## Hieu nang sau khi them `init` + 3 fix (box S905W, binary 2.0.1-dev)
+
+`bench.sh` (MC=/usr/local/bin/minicontainer, BR=/opt/rootfs):
+- 1000 lan `run --rootfs /opt/rootfs /bin/true`: MIN 48 ms, AVG 61 ms, **P50 61 ms**, P95 73 ms,
+  P99 79 ms, MAX 89 ms.
+- Idle RSS: **0 KB**; so tien trinh `minicontainer` khi khong chay container: **0**. Khong co daemon
+  thuong tru. So sanh tren cung box: `dockerd` 123.616 KB + `containerd` 72.868 KB thuong tru.
+- Churn 100 vong start/stop/rm: 0 failed spawn, khong con cgroup mo coi sau khi `rm` container.
+- Binary aarch64 van **284.208 B** (them `appinit.c` nhung --gc-sections cat het); x86_64 glibc
+  1.205.776 B (chi dung cho harness laptop, khong phai artifact phat hanh).
+
+Ket luan: them `init` + 3 fix khong tang latency (P50 61 ms = moc v2.0.0) va khong sinh tien trinh
+nen. Chi phi duy nhat la ~5 KB code them trong binary; runtime van zero-daemon.
+
+## Demo tuong tac: moi buoc in MAY / VIEC / GO / THAY (2026-11-22 23:00)
+
+3 script demo them `declare -A NOTE` va in khoi mo ta truoc output that:
+- `MAY`  : dang o may nao (Laptop / TV BOX / scp giua 2 may)
+- `VIEC` : buoc nay lam gi
+- `GO`   : dung lenh nguoi dung go (copy duoc vao terminal)
+- `THAY` : ket qua mong doi de doi chieu
+
+Loi that phat hien khi ra soat: `minicontainer ps` **khong in dong header**, nhung v1 don rac bang
+`awk "NR>1{print $1}"` nen bo qua moi container -> container STOPPED (vd `repoinfo-box`) song sot
+qua nhieu lan chay. Da sua: loc theo cot trang thai `RUNNING|STOPPED`, va dem image bang so dong
+thuc (bo header + dong `(chua co image nao)`). Sau khi sua P2 in `containers: (trong) · images: 0`.
+
+Chay lai ca 3 bang binary 2.0.1-dev:
+- v1: 22:56:23 -> 22:59:09 (2 m 46 s), 2 chieu xanh, bundle `9a4840c1..e7b7` (17 MB) va
+  `6c171aeb..20b9` (55.9 MB), nhiet do 20.2 C / 92 % giong nhau o 2 may.
+- v2: 22:46:52 -> 22:50:20 (3 m 28 s), init diff rong; box 183/13.3 ms, laptop 62/0.6 ms,
+  sai arch 3.8 ms va `Exec format error`.
+- v3: 22:59:32 -> 22:59:54 (22 s), box amlogic/63 C/OK, ep pc_x86 -> WRONG_BACKEND;
+  laptop pc_x86/59 C/OK, ep amlogic -> WRONG_BACKEND.
+
+## Hoan thien hien thi demo (2026-11-22 23:17)
+
+- Bo dong banner "Moi buoc in: MAY / VIEC / GO / THAY ..." trong ca 3 script; banner chi con ten may.
+- Chuyen toan bo comment/echo/thong bao cua 3 script demo + build-local.sh sang tieng Viet co dau
+  (ten slug cua step giu nguyen de ten file log khong doi). `bash -n` ca 4 file OK.
+- Chay lai lan cuoi bang binary 2.0.1-dev, tat ca xanh:
+  v1 23:10:48 -> 23:13:28 (2m40, bundle `6ca96fd5..f9ad` va `e4425cad..4848`, 20.2 C / 92 %);
+  v2 23:14:04 -> 23:17:33 (3m29, box 183/12.1 ms, laptop 62/0.6 ms, sai 3.8 ms + Exec format error);
+  v3 23:10:17 -> 23:10:39 (22s, amlogic/63 C OK, pc_x86 OK, 2 lan ep sai WRONG_BACKEND).
+
+## Chuyen demos sang dong goi source bang archive (2026-11-22 23:41)
+
+Tam thoi (huong 1): ca 3 demo thay `scp -r <thu muc>` bang `tar czf` -> `scp 1 file` ->
+`tar xzf` o dich, co `sha256sum` in ra 2 dau. Khong doi source C.
+- v1: `app-box.tar.gz` sha `dee11907..5120` (hai dau khop), P3 23:33:52; tong 23:33:48 -> 23:36:30.
+  Ship 2 chieu van xanh: bundle `b93b206e..729bb` va `12476a7f..92ac`, 20.1 C / 93 %.
+- v2: `app.tar.gz` sha `bcbd05a7..e6d` (hai dau khop); box 183/11.9 ms, laptop 62/0.6 ms,
+  sai arch 3.6 ms + Exec format error. Tong 23:37:07 -> 23:40:38.
+- v3: `hwprobe.tar.gz` sha `997c7490..e7e` (hai dau khop); OK/WRONG_BACKEND/OK/WRONG_BACKEND
+  nhu cu. Tong 23:40:59 -> 23:41:22.
+
+Ke hoach chuyen archive shell thanh tinh nang `minicontainer pack/unpack` (huong 3) da ghi
+trong `PLAN_NOV22.md` (them README root link). Binary demo van 2.0.1-dev, chua tag/release.
+
+## So sanh minicontainer vs Docker — cung bai test, 2 may (2026-11-22 23:50)
+
+Phuong phap: `/bin/true`, N=20 lan/runtime, do lien tiep bang `date +%s%N`; Docker `alpine:3.19`
+(pull truoc), minicontainer dung cung rootfs Alpine (box `/opt/rootfs`, laptop rootfs extract duoc
+mount vao harness). RAM: `ps -eo rss=,comm=` sampling trong luc chay `/bin/sleep 10`. CPU: shell
+`time` (real/user/sys). Disk: `stat`, `du -sk`, `docker system df`. Du lieu tho:
+`/tmp/opencode/perf/{laptop-docker-ms,laptop-mini-ms,box-docker,box-mini}.txt`.
+
+### TV Box S905W (aarch64, root truc tiep, binary 2.0.1-dev musl)
+- minicontainer N=20: min 55, **p50 64**, p95 77, max 95 ms; 1 lan `time`: real 0.038 s, sys 0.017 s.
+- Docker N=20: min 1576, **p50 1641**, p95 1743, max 2541 ms; 1 lan: real 1.679 s, user 0.077 s,
+  sys 0.059 s. Ty le **~26x**.
+- Idle: 0 tien trinh minicontainer / 0 KB. Docker idle: dockerd+containerd+shims = 256.320 KB
+  (da co portainer/samba chay san).
+- Dang chay container: minicontainer supervisor max RSS 512 KB; Docker daemon tang 14.988 KB.
+- Dia: binary 284.208 B; `/var/lib/minicontainer` 232.896 KB (con images demo); Docker images
+  320.3 MB + containers 6.328 MB.
+
+### Laptop x86_64 (minicontainer trong harness ubuntu:24.04 privileged, Docker truc tiep)
+- minicontainer N=20: min 2, **p50 2**, p95 5, max 19 ms; 1 lan: real 0.002 s, sys 0.002 s.
+- Docker N=20: min 520, **p50 568**, p95 593, max 600 ms; 1 lan `/usr/bin/time -v`: elapsed 0.56 s,
+  user/sys 0.00/0.00 (CLI), max RSS 28.032 KB. Ty le **~284x**.
+- Idle: 0 tien trinh minicontainer / 0 KB. Docker idle: 123.444 KB (containerd 55.208 + dockerd
+  69.948 + shim 10.812).
+- Dang chay: minicontainer max RSS 924 KB; Docker daemon tang 10.912 KB.
+- Dia: binary x86_64 glibc static 1.205.776 B (chi dung harness), state 8 KB; Docker images 211.7 MB.
+
+Ghi chu: box va laptop khong doi xung hoan toan (laptop khong co sudo nen mini chay trong harness),
+ nen so sanh p50 trong moi may la chinh xac, con so sanh cheo giua 2 may chi mang tinh tham khao.
+Khong tao ra tien trinh minicontainer thuong tru — claim zero-daemon duoc do thay vi gia dinh.
+
+Ket qua da ghi vao `README.md` (muc Performance) va `demo-cross-ship/README.md` (muc 7).
+
+## Bundle da kien truc + bo warning /dev/console (2026-11-23 00:30)
+
+Yeu cau: "o TV Box pull arm64 nhung export sang laptop van tu nhan dien x86 va chay binh thuong".
+Khong the dich ma may aarch64 thanh x86 luc import (trừ khi qemu — dự án không dùng). Giai phap:
+mot bundle chua NHIEU rootfs + index, runtime chon bien the khop MC_ARCH.
+
+Source thay doi:
+- `src/multiarch.c` (moi): `export [--arch=ARCH] <img> <img>... -o FILE` -> `multiarch.json`
+  (`name`, `preferred`, `variants[].{arch,path}`) + `<arch>.tar` (moi cai la ship bundle chuẩn).
+- `src/ship.c`: `import` nhan ra `multiarch.json`, chon bien the theo `MC_ARCH`, goi lai chinh no
+  tren inner tar -> van kiem sha256 nhu bundle don.
+- `src/namespace_setup.c`: bo `warning: optional /dev/console unavailable` (thiet bi optional).
+- `src/main.c`, `src/cli.c`, `src/common.h`: dang ky export da anh, usage.
+- `build/test.sh`: them 2 case -> tong 187.
+- Binary aarch64 musl **288.304 B** (tet 4 KB so voi 284.208 B), van < 300 KB; x86 harness
+  1.205.776 B.
+
+Regression:
+- Box S905W `test.sh`: **186 PASS / 0 FAIL / 1 SKIP / 187** (ca 2 case multi PASS).
+- Ubuntu 24.04 `local-test.sh`: **180 PASS / 0 FAIL / 7 SKIP / 187**.
+- Smoke truoc demo: `/dev/console` warning khong con (laptop harness `/bin/echo SMOKE_OK` sach).
+
+Demo v1 chay lai 00:27:11 -> 00:30:33 (3m22) bang binary 2.0.1-dev:
+- Chieu A: box export **1 bundle** `weather-multi.tar.gz` sha `bf3bb9b0..4416` (34 MB, chua
+  aarch64.tar + x86_64.tar + multiarch.json); laptop import in `chon bien the x86_64 (may nay
+  x86_64)`, chay native, 20.0 C / 93 % giong box.
+- Chieu B: laptop export `repoinfo-multi.tar.gz` sha `b0f787e2..604b` (34 MB) + ban chi x86
+  `repoinfo-x86-only.tar.gz` sha `cec131db..51f6` (17 MB); box chay ban chi x86 -> Exec format
+  error (FAIL DO), roi import multi -> `chon bien the aarch64`, chay native OK.
+- v2 (pip) va v3 (HAL) chay lai van xanh đung kich ban sau khi doi import.
+
+Gioi han da ghi ro: may export van phai build/pull ban arch dich de dua vao bundle; runtime chi chon.
+Khong tag/release. Docs cap nhat: README.md (CLI + performance), demo-cross-ship/README.md, PLAN_NOV22.md.

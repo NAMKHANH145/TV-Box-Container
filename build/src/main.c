@@ -75,12 +75,18 @@ int main(int argc, char **argv) {
     }
     if (argc >= 4 && strcmp(argv[1], "export") == 0) {
         const char *out = NULL;
-        for (int i = 3; i < argc; i++) {
-            if (strncmp(argv[i], "-o", 2) == 0) {
-                if (argv[i][2]) out = argv[i] + 2;
-                else if (i + 1 < argc) out = argv[++i];
-            } else if (strncmp(argv[i], "--output=", 9) == 0) out = argv[i] + 9;
+        int multi = 0;
+        for (int i = 2; i < argc; i++) {
+            if (!strcmp(argv[i], "-o")) {
+                if (i + 1 < argc) out = argv[++i];
+                continue;
+            }
+            if (!strncmp(argv[i], "--output=", 9)) { out = argv[i] + 9; continue; }
+            if (argv[i][0] != '-' && i > 2 &&
+                strcmp(argv[i - 1], "-o") != 0 && strncmp(argv[i - 1], "--output=", 9) != 0)
+                multi = 1;
         }
+        if (multi) return do_export_multi(argc, argv);
         if (!out) { fprintf(stderr, "Usage: %s export <image> -o <bundle.tar.gz>\n", argv[0]); return 1; }
         return do_export(argv[2], out);
     }
@@ -91,6 +97,12 @@ int main(int argc, char **argv) {
             else if (strcmp(argv[i], "--verify") == 0 && i + 1 < argc) key = argv[++i];
         }
         return do_import(argv[2], key);
+    }
+    if (argc >= 3 && strcmp(argv[1], "init") == 0)
+        return do_init(argc, argv);
+    if (argc >= 2 && strcmp(argv[1], "init") == 0) {
+        fprintf(stderr, "Usage: %s init <dir> [--pip=PKG]... [--base=IMAGE]\n", argv[0]);
+        return 1;
     }
     if (argc >= 2 && strcmp(argv[1], "build") == 0)
         return do_build(argc, argv);

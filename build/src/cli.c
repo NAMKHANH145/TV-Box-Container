@@ -222,6 +222,8 @@ void print_usage(const char *prog) {
 		"       %s check [--json] |\n"
 		"       %s load <file.tar> [--tag=NAME] | images [--json] | rmi <name> | save <name> -o <file.tar> |\n"
 		"       %s build -t NAME[:TAG] [-f Dockerfile] [--no-cache] [--platform=linux/arm64] CONTEXT |\n"
-		"       %s export <image> -o <bundle.tar.gz> | import <bundle> [--verify=PUBKEY] |\n"
-		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog);
+		"       %s init <dir> [--pip=PKG]... [--base=IMAGE] |\n"
+		"       %s export <image> -o <bundle.tar.gz> | export [--arch=ARCH] <image> <image>... -o <multi.tar.gz> |\n"
+		"       %s import <bundle> [--verify=PUBKEY] |\n"
+		"       --version\n", prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog, prog);
 }

@@ -24,7 +24,7 @@
 #include <linux/seccomp.h>
 
 #define STACK_SIZE (1024 * 1024)
-#define MC_VERSION "2.0.0"
+#define MC_VERSION "2.0.1"
 
 /* Compile-time target arch/libc — used by `--version`, `check`, `sdk pack` and
  * the rootfs arch guard in run.c. Keep in sync with generate_seccomp.py. */
@@ -236,8 +236,10 @@ int verify_signature(const char *pkg, const char *keypath);
 const char *img_base(void);
 int img_load(const char *file, const char *tag_override);
 int img_install(const char *stage, const char *tag_override);
+int do_init(int argc, char **argv);
 int do_build(int argc, char **argv);
 int do_export(const char *image, const char *out);
+int do_export_multi(int argc, char **argv);
 int do_import(const char *bundle, const char *key);
 int img_rootfs(const char *name, char *out, size_t n);
 int do_images(int json);

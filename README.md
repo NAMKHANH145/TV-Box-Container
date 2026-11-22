@@ -92,7 +92,7 @@ minicontainer run [--name=ID] [-d] [--rm] [--restart=no|on-failure|always] [--in
 minicontainer ps|stats|logs|inspect|stop|rm|start|restart|exec|cp ...
 minicontainer pull REF | pull --offline=DIR | images | load | save | rmi | gc
 minicontainer build -t NAME:tag [-f Dockerfile] [--no-cache] [--platform=linux/arm64] CONTEXT
-minicontainer export IMAGE -o BUNDLE | import BUNDLE [--verify=KEY]
+minicontainer export IMAGE -o BUNDLE | export [--arch=ARCH] IMAGE IMAGE... -o MULTI | import BUNDLE [--verify=KEY]
 minicontainer update apply PKG [--verify=KEY] [--health-cmd=CMD] [--link=PATH]
 minicontainer update status|rollback|current|diff|patch ...
 minicontainer compose [-f FILE] up|down|ps
@@ -235,6 +235,38 @@ in [progress/VERIFICATION_LOG.md](progress/VERIFICATION_LOG.md) and [PLAN_FINAL.
 | [TASK.md](TASK.md) | work split, definition of done, handoff |
 | [progress/](progress/) | phase logs, changelog, verification evidence |
 | [recipes/](recipes/) | nginx, Node, Python, Mosquitto and a two-service gateway |
+| [demo-cross-ship/](demo-cross-ship/) | 3 runnable demos (v1 two-way ship, v2 pip wheels per arch, v3 hardware HAL) with logs |
+| [PLAN_NOV22.md](PLAN_NOV22.md) | plan: promote source packaging into a real `minicontainer pack/unpack` feature |
+
+## Performance (measured 22 Nov 2026)
+
+Same workload on both machines: start a container running `/bin/true`, N=20 runs per runtime,
+invoked back-to-back. Docker used `alpine:3.19`; minicontainer used the same Alpine rootfs
+(`/opt/rootfs` on the box, an extracted copy inside the privileged harness on the laptop).
+
+| Metric | TV Box S905W (aarch64) | Laptop (x86_64) |
+|---|---|---|
+| minicontainer start, p50 / p95 / max | **64 / 77 / 95 ms** | **2 / 5 / 19 ms** |
+| Docker start, p50 / p95 / max | 1641 / 1743 / 2541 ms | 568 / 593 / 600 ms |
+| Speedup | **~26×** | **~284×** |
+| minicontainer idle processes / RSS | **0 / 0 KB** | **0 / 0 KB** |
+| Docker daemon idle RSS (dockerd + containerd + shims) | 250 MB (256.320 KB) | 120 MB (123.444 KB) |
+| minicontainer RSS while container runs | 512 KB | 924 KB |
+| Docker daemon RSS increase while container runs | +14.6 MB (14.988 KB) | +10.7 MB (10.912 KB) |
+| CPU for one minicontainer run (real / sys) | 0.038 / 0.017 s | 0.002 / 0.002 s |
+| CPU for one Docker run (real / user+sys) | 1.679 / 0.136 s | 0.560 / 0.000 s |
+| minicontainer binary / state on disk | 284.208 B / 227 MB | 1.205.776 B / 8 KB |
+| Docker images + containers on disk | 320.3 MB + 6.3 MB | 211.7 MB + 0 B |
+
+Zero-daemon is measured, not assumed: no `minicontainer` process exists between runs, while
+Docker keeps 120–250 MB resident. The 284 KB binary is the shipped musl artifact; the 1.2 MB
+x86_64 build exists only for the laptop test harness.
+
+Caveats: on the box both runtimes run directly as root; on the laptop minicontainer runs inside a
+privileged `ubuntu:24.04` harness (no passwordless sudo) while Docker runs on the host. The box
+Docker daemon was already serving the user's Portainer/Samba containers, so its baseline includes
+those shims. These are cold-start latencies of a trivial container, not throughput benchmarks.
+Raw numbers and commands: [progress/VERIFICATION_LOG.md](progress/VERIFICATION_LOG.md).
 
 ## Security
 

@@ -17,6 +17,12 @@ build/*.tar.gz.sha256
 *.log
 *.tmp
 /tmp/
+# Demo binaries and generated bundles (source: demo-cross-ship/build-local.sh)
+demo-cross-ship/minicontainer-linux-*
+demo-cross-ship/SHA256SUMS.txt
+demo-cross-ship/results/
+demo-cross-ship/**/*.tar.gz
+demo-cross-ship/**/*.tar.gz.sha256
 
 # Editors / OS
 .vscode/

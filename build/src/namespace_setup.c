@@ -142,13 +142,13 @@ void namespace_setup_dev(const char *rootfs) {
 #define NODE(name, mode, ma, mi) \
     do { if (path_join(t, sizeof t, d, name) == 0) { \
           int e = dev_setup_one(t, name, mode, ma, mi); \
+          /* tty/console are optional: a harness/container host often has no
+           * /dev/console at all. Silent skip — warning on every `run` only
+           * adds noise and hides real errors. */ \
           if (e && (!strcmp(name, "null") || !strcmp(name, "zero") || \
                     !strcmp(name, "random") || !strcmp(name, "urandom"))) { \
               edevice = e; \
               fprintf(stderr, "minicontainer: failed to create /dev/%s: %s\n", \
-                      name, strerror(e)); \
-          } else if (e) { \
-              fprintf(stderr, "minicontainer: warning: optional /dev/%s unavailable: %s\n", \
                       name, strerror(e)); \
           } } } while (0)
     NODE("null", 0666, 1, 3);

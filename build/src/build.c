@@ -109,8 +109,23 @@ static int run_in_rootfs(struct bstate *b, const char *cmd) {
         fmt_path(rc, sizeof rc, "%s/etc", b->rootfs);
         mkdir(rc, 0755);
         fmt_path(rc, sizeof rc, "%s/etc/resolv.conf", b->rootfs);
-        char *const cpa[] = { "/usr/bin/cp", "-f", "/etc/resolv.conf", rc, NULL };
-        run_wait(cpa);                       /* best effort: DNS for RUN */
+        /* Keep a real nameserver already shipped in the rootfs (e.g. via COPY):
+         * the host often uses 127.0.0.53/127.0.0.11, which the runtime rejects. */
+        int have_dns = 0;
+        {
+            FILE *rf = fopen(rc, "r");
+            if (rf) {
+                char rb[512] = "";
+                size_t rn = fread(rb, 1, sizeof rb - 1, rf);
+                fclose(rf);
+                rb[rn] = '\0';
+                have_dns = strstr(rb, "nameserver") && !strstr(rb, "127.0.0.");
+            }
+        }
+        if (!have_dns) {
+            char *const cpa[] = { "/usr/bin/cp", "-f", "/etc/resolv.conf", rc, NULL };
+            run_wait(cpa);                   /* best effort: DNS for RUN */
+        }
         if (chroot(b->rootfs) < 0) {
             fprintf(stderr, "minicontainer: build: chroot: %s\n", strerror(errno));
             _exit(125);
@@ -367,6 +382,22 @@ int do_build(int argc, char **argv) {
                 rc = 1;
                 break;
             }
+            /* Store keys images by name only. Cross-building (requested != host)
+             * from a local base is valid for COPY-only Dockerfiles; but building
+             * a NATIVE image from a foreign base is almost always a stale ref
+             * from a previous `pull --platform`, so fail loudly instead of
+             * dying later with an opaque exec error. */
+            if (platform && *platform && strcmp(b.arch, MC_ARCH) == 0) {
+                char ba[BUF_SIZE_SMALL] = "";
+                if (img_arch(name, ba, sizeof ba) == 0 && *ba && strcmp(ba, b.arch) != 0) {
+                    fprintf(stderr,
+                        "minicontainer: build: base '%s' is %s, requested %s; "
+                        "pull it again with --platform=linux/%s\n",
+                        basev, ba, b.arch, b.arch);
+                    rc = 1;
+                    break;
+                }
+            }
             char *const cpa[] = { "/usr/bin/cp", "-a", src, b.rootfs, NULL };
             /* cp -a src rootfs copies src INTO rootfs; use src/. form */
             char srcslash[PATH_MAX];
@@ -435,7 +466,11 @@ int do_build(int argc, char **argv) {
             key_of(key, sizeof key, b.base_key, cmd);
             fmt_path(b.base_key, sizeof b.base_key, "%s", key);
             fmt_path(ckey, sizeof ckey, "%s/build-cache/%s", img_base(), key);
-            int hit = (!no_cache && access(ckey, F_OK) == 0);
+            /* Replaying a cached layer is cp -a (additive only): it cannot
+             * reproduce removals. Never cache/replay a RUN that deletes. */
+            int is_delete = strstr(cmd, "rm ") || strstr(cmd, " unlink") ||
+                            strstr(cmd, "rmdir") || strstr(cmd, ": >");
+            int hit = (!no_cache && !is_delete && access(ckey, F_OK) == 0);
             if (hit) {
                 printf("build: RUN %s  [cache]\n", cmd);
                 char *const cpa[] = { "/usr/bin/cp", "-a", ckey, b.rootfs, NULL };
@@ -457,7 +492,7 @@ int do_build(int argc, char **argv) {
                 rc = 1;
                 break;
             }
-            if (!no_cache) {
+            if (!no_cache && !is_delete) {
                 char parent[PATH_MAX];
                 fmt_path(parent, sizeof parent, "%s/build-cache", img_base());
                 char *const mkd[] = { "/usr/bin/mkdir", "-p", parent, NULL };

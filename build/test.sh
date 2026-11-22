@@ -444,6 +444,16 @@ t "import: bundle bi sua bi tu choi" sh -c "mkdir -p $XB/t && tar -xzf $XB/b.tgz
 t "import --verify: thieu .sig bi tu choi" sh -c "! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
 t "import --verify: sig sai bi tu choi" sh -c "cp $FX/signed-rootfs.tar.gz.sig $XB/b.tgz.sig && ! $MC import $XB/b.tgz --verify=$FX/test.pub >/dev/null 2>&1"
 rm -rf $XB
+echo "=== P1.8b: export/import bundle da kien truc ==="
+HOSTARCH=$(uname -m)
+OTHERARCH=$([ "$HOSTARCH" = x86_64 ] && echo aarch64 || echo x86_64)
+MA=/tmp/mcma; rm -rf $MA; mkdir -p $MA
+printf 'FROM busybox-local:1\nCOPY f /f\n' > $MA/Dockerfile
+echo ma > $MA/f
+t "multi export: bundle co 2 bien the" sh -c "$MC build -t ma-native:1 $MA >/dev/null && $MC build -t ma-foreign:1 --platform=linux/$OTHERARCH $MA >/dev/null && $MC export --arch=$HOSTARCH ma-native-1 ma-foreign-1 -o $MA/multi.tgz >/dev/null && tar -tzf $MA/multi.tgz | grep -q multiarch.json && tar -tzf $MA/multi.tgz | grep -q '$OTHERARCH.tar'"
+t "multi import: tu chon arch may nay" sh -c "$MC rmi ma-native-1 >/dev/null; $MC rmi ma-foreign-1 >/dev/null; $MC import $MA/multi.tgz >/dev/null && grep -qx 'arch=$HOSTARCH' $MC_IMG_BASE/images/ma-native-1/meta && $MC run --image=ma-native-1 /bin/sh -c 'echo multi-ok' | grep -qx multi-ok"
+$MC rmi ma-native-1 >/dev/null 2>&1; $MC rmi ma-foreign-1 >/dev/null 2>&1
+rm -rf $MA
 echo "=== P2: pull tu registry + --platform ==="
 if curl -sS -m 10 -o /dev/null https://registry-1.docker.io/v2/ 2>/dev/null; then
   t "pull registry: alpine:3.19" sh -c "$MC pull alpine:3.19 >/dev/null && $MC images | grep -q '^alpine-3.19'"

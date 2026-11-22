@@ -1,0 +1,48 @@
+minicontainer demo — 14/11/2026 00:36  ·  Linux 6.8.0-124-generic x86_64
+
+== 1. Chay mot lenh trong container ==
+$ minicontainer run --rootfs ./rootfs /bin/sh -c "id -u; echo hello"
+hello from container  (uid=0, pid=1)
+
+== 2. Web server chay nen: RAM 32M, CPU 20% ==
+$ minicontainer run -d --name web --ram=32M --cpu=20 --net=host \
+      --rootfs ./rootfs /bin/httpd -f -p 8080 -h /www
+web
+$ curl -s http://127.0.0.1:8080
+<h1>minicontainer demo</h1>
+<p>web server trong container, RAM 32M, CPU 20%</p>
+
+== 3. ps / stats / exec ==
+$ minicontainer ps
+web              RUNNING  135655   /bin/httpd -f -p 8080 -h /www
+$ minicontainer stats web
+id:      web
+status:  RUNNING
+pid:     135655
+memory:  151552 bytes
+pids:    1
+cpu:     1384 usec
+$ minicontainer exec web /bin/sh -c "ps | wc -l"
+  so tien trinh nhin thay trong container: 6 (host: hang tram)
+
+== 4. Gioi han RAM: chuong trinh xin 80M, kernel giu o 32M ==
+$ minicontainer run -d --name hog --ram=32M --rootfs ./rootfs /hog 80
+hog
+  memory.max     = 32.0 MB
+  memory.current = 20.2 MB  (hog da xin 20 MB)
+  memory.current = 32.0 MB  (hog da xin 50 MB)
+  memory.events  = max 74 oom_kill 0 
+$ minicontainer stop hog; minicontainer rm hog
+
+== 5. Don dep ==
+$ minicontainer stop web; minicontainer rm web
+web: stopped
+web: removed
+$ ls -d /sys/fs/cgroup/minicontainer-* | wc -l
+0   (0 = khong con cgroup rac)
+
+Ghi chu:
+- Chay tren laptop x86_64 (binary build tu cung source aarch64 dang chay tren TV Box).
+- Laptop co swap nen kernel "giu" container o 32M (memory.events max=74).
+  Tren TV Box khong swap: /bomb bi OOM kill, exit code 137.
+- Container thay 6 tien trinh, host thay hang tram -> PID namespace hoat dong.
