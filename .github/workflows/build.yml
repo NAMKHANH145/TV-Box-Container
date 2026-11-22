@@ -31,7 +31,8 @@ jobs:
           (cd /tmp/mc-rel && sha256sum minicontainer-linux-x86_64 > SHA256SUMS.txt)
           MC_BASE_URL=file:///tmp/mc-rel DESTDIR=/tmp/mc-stage PREFIX=/usr/local \
             sh install.sh --no-check
-          /tmp/mc-stage/usr/local/bin/minicontainer version --json | grep -q '"version":"2.0.0"'
+          EXPECTED=$(sed -n 's/.*MC_VERSION "\([^"]*\)".*/\1/p' build/src/common.h)
+          /tmp/mc-stage/usr/local/bin/minicontainer version --json | grep -q "\"version\":\"$EXPECTED\""
 
   # Full integration matrix on the two supported Ubuntu releases. GitHub-hosted
   # runners already provide Docker, so run the same privileged container used
