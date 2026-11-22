@@ -35,3 +35,6 @@ demo-cross-ship/**/*.tar.gz.sha256
 # Local credentials
 *.pass
 deploy/*.pass
+
+# Python bytecode
+__pycache__/
