@@ -265,3 +265,83 @@ v3 đang chứng minh **tầng app/HAL portability**, không phải tầng image
 - Chỉ tồn tại trong 2 lệnh ép sai; các ca auto không có biến này.
 - `status = OK if spec and not missing else (WRONG_BACKEND if how == "forced" else PARTIAL)` —
   nên ép đúng vẫn `OK`, ép sai mới `WRONG_BACKEND`.
+
+---
+
+# Tầm nhìn: artifact trung lập kiến trúc & giới hạn cross-arch (23/11)
+
+## 1. Vì sao v3 chạy được (đây là điều kiện, không phải phép màu)
+
+1. **Artifact là source thuần** (`hwprobe.py`), không có mã máy riêng của aarch64 hay x86_64.
+2. **Mỗi máy đã có runtime của nó**: Python 3.14 trong Buildroot / Python 3.12 trong Alpine.
+3. **Có lớp HAL** dịch đúng sự khác biệt giữa 2 board: tên UART, GPIO, I2C, thermal.
+
+Nói cách khác: v3 là mẫu hình **"app arch-neutral + runtime tại đích + lớp tương thích đủ chi tiết"**.
+Nếu thuật toán/HAL mở rộng được để che hết các khác biệt OS/thiết bị mà app dùng, thì đúng: cùng một
+artifact chạy mọi arch.
+
+## 2. Nhưng KHÔNG phải "mọi file"
+
+| Loại file | Cross-arch được không | Điều kiện |
+|---|---|---|
+| `.py`, script, `.jar`, `.wasm` | Có | Có interpreter/runtime trên máy đích |
+| File dữ liệu, config, ảnh, JSON | Có | Không có mã máy, chỉ cần đúng định dạng |
+| ELF native (`.so`, exe) | **Không native** | Phải build lại cho arch đó, hoặc giả lập (QEMU/Rosetta/Box64) |
+
+Muốn "mọi file" chạy native trên mọi arch thì thuật toán không chỉ dịch tên thiết bị — nó phải dịch
+luôn **tập lệnh máy + ABI**, tức là làm một bộ binary translator/emulator. Đó là chuyên đề riêng,
+chậm hơn nhiều, và đi ngược cam kết hiện tại của dự án (`p50 61 ms`, không qemu, 0 daemon,
+binary < 300 KB). Không đưa vào phạm vi minicontainer.
+
+## 3. Cách nhẹ nhất để xử lý file "không native" mà vẫn giữ cam kết
+
+Nguyên tắc: **ưu tiên trung tính hóa artifact; nếu không được thì fail loudly — không âm thầm giả lập.**
+
+### a. Source / bytecode (nhẹ nhất, đã có nền tảng)
+
+- `init`/`pack` sinh ra gói **source + manifest năng lực** (`requires: python>=3.12`, danh sách
+  capability HAL cần dùng), không đóng ELF.
+- Khi `import`, runtime kiểm tra năng lực của máy đích. Đủ → chạy native; thiếu → báo rõ
+  `missing runtime: python>=3.12`, không tự tải daemon, không cài đặt ngầm.
+- Đây là mở rộng tự nhiên của `pack` đã lên plan ở phần trước.
+
+### b. COPY-only image (đang làm ở v2.1.0)
+
+- Lưu `base=` + `delta` lúc build; `export --arch=T` tự sinh bản native T từ base đích.
+- Vẫn **1 lệnh export**, không container trung gian, không qemu — đúng cam kết.
+
+### c. Image có RUN/native code (Pillow `.so`, v2)
+
+- Không dịch ELF. Cách tốt nhất: **giữ 2 biến thể native trong 1 bundle** (cơ chế v2.0.1 đã có) và
+  tự chọn lúc import.
+- Nếu chỉ có 1 biến thể: export phải **từ chối với message rõ** (`cannot normalize: ... chua ELF ...`),
+  kèm gợi ý build lại trên máy đích. Im lặng rơi sang qemu là **không được**.
+
+### d. ELF lạ / exe không có source
+
+- Không hỗ trợ native. Hành động đúng: báo lỗi rõ ngay lúc `run`/`import`, nêu arch của file và arch
+  của máy.
+- Nếu người dùng **tự** đăng ký binfmt/qemu ở host, đó là quyết định của họ — minicontainer không gọi,
+  không phụ thuộc, và không tính vào số liệu hiệu năng cam kết. Ghi rõ trong docs để tránh nhầm như
+  phép thử `weather-arm-only` trên laptop (chạy được nhưng là giả lập, `cpu_ms` cao hơn ~6×).
+
+### e. Thay thế khi có thể (tuỳ chọn, không bắt buộc)
+
+- Với tool nhỏ có bản script/Python tương đương, ưu tiên đóng gói bản script thay vì ELF → về lại
+  nhóm (a). Không cố dịch ELF.
+
+## 4. Cam kết không đổi khi áp dụng các cách trên
+
+- 0 tiến trình nền / 0 KB idle; không daemon, không management socket.
+- Không qemu trong runtime; mọi fallback emulation chỉ là tùy chọn ngoài hệ thống.
+- p50 ~61 ms, binary < 300 KB, suite 187 case vẫn xanh.
+- Mọi ca không đủ điều kiện phải **fail loudly**, không "chạy được nhưng sai" (đây là bài học từ A3 v2
+  và phép thử arm-only trên laptop).
+
+## 5. Vị trí trong lộ trình
+
+- (a) → gộp vào `pack` / v2.1.0.
+- (b) → đã mô tả chi tiết ở phần v2.1.0 của file này.
+- (c), (d) → nằm ngay trong guard ELF của `export`/`import`, cần test bổ sung.
+- Tầm nhìn này **không** biến v3 thành "mọi file chạy cross-arch"; nó chỉ định nghĩa ranh giới trung
+  thực và hướng đi để tối đa hóa số artifact trung tính mà vẫn giữ cam kết hiệu năng.
